@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:opsz,wght@6..12,400;6..12,700;6..12,800&display=swap" rel="stylesheet">
+<style>*{box-sizing:border-box}html,body{margin:0;background:#FAF5EE;color:#3A2215;font-family:'Nunito Sans',system-ui,sans-serif}a{color:#17675F}a:hover{color:#C4610F}</style>
+</helmet>
+<div style="max-width:1100px;margin:0 auto;padding:24px 16px 64px;display:flex;flex-direction:column;gap:20px">
+<div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px"><div><h1 style="margin:0;font-size:26px;font-weight:800">Mundo das Patas · Testes automatizados</h1><div style="font-size:14px;color:#6E5546;margin-top:4px">Carrega a demo em modo de teste (dados isolados, não afeta a demonstração) e executa os fluxos e as verificações de layout.</div></div><button onClick="{{ run }}" disabled="{{ running }}" style="min-height:44px;padding:0 18px;border-radius:12px;border:0;background:#C4610F;color:#fff;font-weight:800;cursor:pointer;white-space:nowrap">Executar novamente</button></div>
+<div style="padding:14px 16px;border-radius:14px;background:#fff;border:1px solid #EEDFCB;font-weight:700">{{ status }}</div>
+<section style="background:#fff;border:1px solid #EEDFCB;border-radius:18px;padding:18px"><h2 style="margin:0 0 10px;font-size:18px">Regressão funcional · {{ funcSummary }}</h2>
+<sc-for list="{{ func }}" as="t"><div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid #F3EADF;font-size:14px"><span style="flex-shrink:0;padding:2px 8px;border-radius:6px;font-weight:800;font-size:11px;background:{{ t.bg }};color:{{ t.fg }}">{{ t.label }}</span><span style="min-width:0">{{ t.name }}<sc-if value="{{ t.hasInfo }}"><span style="color:#9C2A20"> — {{ t.info }}</span></sc-if></span></div></sc-for>
+</section>
+<section style="background:#fff;border:1px solid #EEDFCB;border-radius:18px;padding:18px"><h2 style="margin:0 0 10px;font-size:18px">Responsividade · {{ respSummary }}</h2>
+<div style="font-size:13px;color:#6E5546;margin-bottom:8px">Critérios: sem rolagem horizontal da página; nenhum controle fora da tela (exceto dentro de navegação com rolagem própria); nenhum texto de botão excedendo o botão; modais dentro da largura e altura da tela e sem rolagem horizontal interna. Alvos de toque abaixo de 44 px são contados à parte.</div>
+<sc-for list="{{ resp }}" as="r"><div style="padding:10px 0;border-top:1px solid #F3EADF"><div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><strong style="font-size:15px">{{ r.res }}</strong><span style="padding:2px 8px;border-radius:6px;font-weight:800;font-size:11px;background:{{ r.bg }};color:{{ r.fg }}">{{ r.label }}</span><span style="font-size:13px;color:#6E5546">{{ r.summary }}</span></div><sc-for list="{{ r.fails }}" as="f"><div style="font-size:13px;color:#9C2A20;margin-top:4px">{{ f.text }}</div></sc-for></div></sc-for>
+</section>
+<section style="background:#fff;border:1px solid #EEDFCB;border-radius:18px;padding:18px"><h2 style="margin:0 0 10px;font-size:18px">Botões abaixo de 44 px (largura × altura)</h2><div style="font-size:13px;line-height:1.6;color:#5A4535">{{ smallList }}</div></section>
+<div ref="{{ stage }}" style="position:fixed;left:-30000px;top:0"></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const SRC='Mundo%20das%20Patas.dc.html?test=1';
+const RES=[[320,568],[360,800],[375,812],[390,844],[768,1024],[820,1180],[1024,768],[1366,768],[1440,900]];
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+class Component extends DCLogic {
+  state={status:'Preparando…',func:[],resp:[],running:false};
+  stage=React.createRef();
+  componentDidMount(){this.run()}
+  async load(w,h){
+    const box=this.stage.current;box.innerHTML='';
+    const f=document.createElement('iframe');f.style.cssText=`width:${w}px;height:${h}px;border:0;display:block`;f.src=SRC+'&r='+Date.now();box.appendChild(f);
+    for(let i=0;i<200;i++){await sleep(100);try{if(f.contentWindow.__mdp)break}catch(e){}}
+    const win=f.contentWindow;if(!win.__mdp)throw new Error('demo não carregou');
+    try{await win.document.fonts.ready}catch(e){}
+    await sleep(500);return win;
+  }
+  check(win){
+    const d=win.document,vw=win.innerWidth,vh=win.innerHeight,issues=[];let small=0;
+    if(d.documentElement.scrollWidth>vw+1)issues.push(`rolagem horizontal: ${d.documentElement.scrollWidth}px > ${vw}px`);
+    const inScroll=el=>{for(let e=el.parentElement;e&&e!==d.body;e=e.parentElement){const ox=win.getComputedStyle(e).overflowX;if(ox==='auto'||ox==='scroll')return true}return false};
+    const els=[...d.querySelectorAll('button,input,select,textarea')].filter(el=>{const r=el.getBoundingClientRect();return r.width>0&&r.height>0&&win.getComputedStyle(el).visibility!=='hidden'&&!(el.type==='file')});
+    els.forEach(el=>{const r=el.getBoundingClientRect();const lbl=(el.getAttribute('aria-label')||el.textContent||el.placeholder||el.tagName).replace(/\s+/g,' ').trim().slice(0,40);
+      if(!inScroll(el)&&(r.right>vw+1||r.left<-1))issues.push(`fora da tela: "${lbl}"`);
+      if(el.tagName==='BUTTON'&&![...el.querySelectorAll('*')].some(c=>win.getComputedStyle(c).position==='absolute')&&el.scrollWidth>el.clientWidth+2)issues.push(`texto excede botão: "${lbl}"`);
+      if(el.tagName==='BUTTON'&&!el.disabled&&(r.height<43.5||r.width<43.5)){small++;(this._sm=this._sm||new Set()).add(lbl+' '+Math.round(r.width)+'x'+Math.round(r.height))}});
+    d.querySelectorAll('[role=dialog],[role=alertdialog]').forEach(g=>{const r=g.getBoundingClientRect();if(r.left<-1||r.right>vw+1)issues.push('modal excede a largura');if(r.height>vh+1)issues.push('modal excede a altura');if(g.scrollWidth>g.clientWidth+1)issues.push('modal com rolagem horizontal')});
+    return {issues,small};
+  }
+  async run(){
+    this.setState({running:true,func:[],resp:[]});
+    try{await this.functional()}catch(e){this.setState(s=>({func:[...s.func,{name:'Erro na execução',pass:false,info:String(e)}]}))}
+    try{await this.responsive()}catch(e){this.setState(s=>({resp:[...s.resp,{res:'Erro',pass:false,fails:[String(e)],small:0,n:0}]}))}
+    this.setState({running:false,status:'Concluído em '+new Date().toLocaleTimeString('pt-BR')});
+    this.state.func.filter(t=>!t.pass).forEach(t=>console.log('FUNC_FAIL',t.name,t.info||''));
+    this.state.resp.forEach(r=>console.log('RESP',r.res,r.pass?'PASS':'FAIL','small='+r.small,(r.fails||[]).map(f=>f.text||f).slice(0,12).join(' | ')));
+    this.setState({smallList:[...(this._sm||[])].join(' | ')});
+    console.log('SMALL',[...(this._sm||[])].slice(0,30).join(' | '));
+    console.log('QA_SUM',this.state.func.filter(t=>t.pass).length+'/'+this.state.func.length,JSON.stringify({func:this.state.func.map(t=>[t.pass?'PASS':'FAIL',t.name,t.info||'']),resp:this.state.resp.map(r=>[r.res,r.pass?'PASS':'FAIL',r.n,r.small,r.fails])}));
+  }
+  async functional(){
+    this.setState({status:'Regressão funcional (1366 × 768)…'});
+    const win=await this.load(1366,768),I=win.__mdp,S=()=>I.state,R=()=>I.renderVals();
+    const T=[],ok=(name,c,info)=>{T.push({name,pass:!!c,info:c?'':(info||'')});this.setState({func:[...T]})};
+    const tick=(ms=150)=>sleep(ms);
+    I.setState({q:'bola'});await tick();ok('Busca "bola" encontra Bola de Borracha',R().catalog.some(p=>p.id==='p10'));
+    I.setState({q:'',cat:'higiene'});await tick();ok('Filtro por categoria (Higiene)',R().catalog.length>0&&R().catalog.every(p=>p.cat==='higiene'));
+    I.setState({cat:'all',sort:'asc'});await tick();{const c=R().catalog.filter(p=>p.hasPrice).map(p=>p.price);ok('Ordenação por menor preço',c.length>3&&c.every((v,i)=>!i||c[i-1]<=v))}
+    I.setState({sort:'featured'});await tick();
+    ok('Produto não publicado (Arranhador) fora do catálogo',!R().catalog.some(p=>p.id==='p13'));
+    ok('Ilustrações carregadas nos cards',R().catalog.every(p=>p.img&&p.img.indexOf('assets/produtos/')===0));
+    I.addToCart('p10',2);await tick();ok('Adicionar 2 un. ao carrinho',S().cart.p10===2);
+    I.setQty('p10',3);await tick();ok('Alterar quantidade para 3',S().cart.p10===3);
+    I.addToCart('p3',1);await tick();ok('Produto esgotado não entra no carrinho',!S().cart.p3);
+    I.addToCart('p7',99);await tick();ok('Quantidade limitada ao estoque (2)',S().cart.p7===2);
+    I.setQty('p7',0);await tick();ok('Remover item',!('p7' in S().cart));
+    R().orderWa();await tick();ok('Mensagem do WhatsApp lista itens e quantidades',/Bola de Borracha Maciça — 3 unidades/.test(S().wa.text));
+    ok('URL wa.me com 55 único e texto codificado',R().waUrl.indexOf('https://wa.me/5511900000000?text=')===0&&R().waUrl.indexOf(encodeURIComponent('—'))>0);
+    ok('Abrir WhatsApp não registra venda',S().sales.length===6);
+    I.setState({wa:null});
+    I.addToCart('p1',2);await tick();I.openSM('p1','ajuste');await tick();I.setState({sm:{...S().sm,qty:'1',note:'Contagem'}});await tick();I.saveSM();await tick(300);
+    ok('Estoque reduzido para 1 → carrinho ajustado para 1',S().cart.p1===1&&I.prod('p1').stock===1,`carrinho=${S().cart.p1}`);
+    I.togglePub('p10');await tick(300);ok('Ocultar produto remove do carrinho',!('p10' in S().cart));I.togglePub('p10');await tick();
+    I.addToCart('p17',1);await tick();I.toggleCat('higiene');await tick(300);ok('Desativar categoria remove itens e oculta produtos',!('p17' in S().cart)&&!R().catalog.some(p=>p.cat==='higiene'));
+    ok('Dashboard: "Visíveis no catálogo" = itens no catálogo',R().metrics.find(m=>m.l==='Visíveis no catálogo').v===R().catalog.length,`${R().metrics.find(m=>m.l==='Visíveis no catálogo').v} vs ${R().catalog.length}`);
+    I.toggleCat('higiene');await tick();
+    I.addToCart('p1',1);await tick();I.archive('p1');await tick();R().cYes();await tick(300);ok('Arquivar produto remove do carrinho',!('p1' in S().cart)&&I.prod('p1').archived);I.restore('p1');I.togglePub('p1');await tick();
+    I.openPF(null);await tick();I.setState({pf:{...S().pf,name:'Produto Teste QA',cat:'brinquedos',price:'1.234,56',showPrice:true,stock:'5',min:'1'}});await tick();I.savePF();await tick(300);
+    const np=S().products.find(p=>p.name==='Produto Teste QA');ok('Cadastrar produto com preço "1.234,56" → 1234.56',np&&np.price===1234.56&&np.stock===5,np?String(np.price):'não criado');
+    ok('Novo produto aparece no catálogo com ilustração',np&&R().catalog.some(p=>p.id===np.id&&p.img==='assets/produtos/cat-brinquedos.svg'));
+    I.openPF(np);await tick();ok('Edição exibe preço "1.234,56"',S().pf.price==='1.234,56',S().pf.price);
+    I.setState({pf:{...S().pf,name:'Produto Teste QA editado'}});await tick();I.savePF();await tick();ok('Editar produto mantém centavos',I.prod(np.id).name==='Produto Teste QA editado'&&I.prod(np.id).price===1234.56);
+    I.openPF(null);await tick();I.setState({pf:{...S().pf,name:'X',price:'12,3,4'}});await tick();I.savePF();await tick();ok('Validação bloqueia nome curto e preço inválido',!!S().pfErr.name&&!!S().pfErr.price&&!!S().pf);I.setState({pf:null});await tick();
+    I.togglePub(np.id);await tick();ok('Ocultar produto',!I.prod(np.id).published&&!R().catalog.some(p=>p.id===np.id));
+    I.archive(np.id);await tick();R().cYes();await tick(300);ok('Arquivar produto',I.prod(np.id).archived);
+    I.restore(np.id);await tick();ok('Restaurar produto',!I.prod(np.id).archived);
+    const s3=I.prod('p3').stock;I.openSM('p3','entrada');await tick();I.setState({sm:{...S().sm,qty:'5'}});await tick();I.saveSM();await tick();ok('Entrada de estoque (+5)',I.prod('p3').stock===s3+5&&S().movements[0].type==='entrada');
+    I.openSM('p3','ajuste');await tick();I.setState({sm:{...S().sm,qty:'-3',note:'teste'}});await tick();I.saveSM();await tick();ok('Ajuste para valor negativo rejeitado',!!S().smErr&&I.prod('p3').stock===s3+5);I.setState({sm:null});
+    I.openSM('p3','ajuste');await tick();I.setState({sm:{...S().sm,qty:'2',note:'Contagem'}});await tick();I.saveSM();await tick();ok('Ajuste de quantidade (contagem = 2)',I.prod('p3').stock===2);
+    const st6=I.prod('p6').stock,sc=S().sales.length,u0=R().salesUnits;
+    I.openSale();await tick();I.setState({sale:{...S().sale,pick:'p6',qty:String(st6+1)}});await tick();I.addLine();await tick();ok('Venda acima do estoque bloqueada',!!S().saleErr&&S().sale.lines.length===0);
+    I.setState({sale:{...S().sale,pick:'p6',qty:'2'}});await tick();I.addLine();await tick();I.confirmSale();await tick(300);
+    const ns=S().sales[0];ok('Registrar venda reduz estoque e soma unidades',S().sales.length===sc+1&&I.prod('p6').stock===st6-2&&R().salesUnits===u0+2);
+    I.cancelSale(ns.id);await tick();R().cYes();await tick(300);ok('Cancelar venda estorna estoque',I.prod('p6').stock===st6&&S().sales[0].status==='Cancelada');
+    ok('Venda cancelada não conta como concluída',R().salesUnits===u0&&R().salesCount===sc);
+    ok('Nenhum estoque negativo',S().products.every(p=>p.stock>=0));
+    I.setTab('settings');await tick();I.setState({draft:{...S().draft,whatsapp:'123'}});await tick();I.saveSettings();await tick();ok('WhatsApp inválido rejeitado com mensagem',S().settings.whatsapp!=='123'&&!!S().draftErr);
+    I.setState({draft:{...S().draft,whatsapp:'+55 (21) 98888-7777',storeName:'Mundo das Patas QA'}});await tick();I.saveSettings();await tick();
+    R().openContactWa();await tick();ok('Configurações salvas; +55 não duplicado na URL',S().settings.storeName==='Mundo das Patas QA'&&R().waUrl.indexOf('https://wa.me/5521988887777?')===0,R().waUrl.slice(0,40));I.setState({wa:null});
+    ok('Testes unitários de preço/WhatsApp',R().unitTests.every(t=>t.label==='PASS'),R().unitSummary);
+    I.resetDemo();await tick();R().cYes();await tick(300);ok('Restaurar dados de demonstração',S().products.length===19&&S().settings.storeName==='Mundo das Patas'&&S().sales.length===6);
+  }
+  async responsive(){
+    const out=[];
+    const CLEAR={cartOpen:false,menuOpen:false,detail:null,wa:null,pf:null,sm:null,sale:null,cf:null,confirm:null};
+    for(const [w,h] of RES){
+      this.setState({status:`Responsividade ${w} × ${h}…`});
+      const win=await this.load(w,h),I=win.__mdp;
+      const steps=[
+        ['Loja',()=>I.setState({...CLEAR,view:'public'})],
+        ['Menu',()=>I.setState({...CLEAR,menuOpen:true})],
+        ['Loja (rolada)',()=>{I.setState(CLEAR);win.scrollTo(0,win.document.documentElement.scrollHeight)}],
+        ['Carrinho',()=>{win.scrollTo(0,0);I.addToCart('p1',1);I.addToCart('p15',2);I.setState({...CLEAR,cartOpen:true})}],
+        ['Detalhe',()=>I.setState({...CLEAR,detail:'p1'})],
+        ['WhatsApp 1',()=>{I.setState(CLEAR);I.renderVals().orderWa()}],
+        ['WhatsApp 2',()=>I.setState({wa:{...I.state.wa,step:2}})],
+        ['Admin · Visão geral',()=>{I.setState({...CLEAR,view:'admin'});I.setTab('overview')}],
+        ['Admin · Produtos',()=>I.setTab('products')],
+        ['Admin · Categorias',()=>I.setTab('categories')],
+        ['Admin · Estoque',()=>I.setTab('stock')],
+        ['Admin · Vendas',()=>I.setTab('sales')],
+        ['Admin · Configurações',()=>I.setTab('settings')],
+        ['Form. produto',()=>I.openPF(I.prod('p1'))],
+        ['Form. estoque',()=>I.setState({...CLEAR,sm:{pid:'p1',type:'entrada',qty:'',note:''},smErr:''})],
+        ['Registro de venda',()=>I.setState({...CLEAR,sale:{lines:[{id:'p1',qty:1},{id:'p15',qty:2}],pick:'',qty:'1'},saleErr:''})],
+        ['Confirmação',()=>I.setState({...CLEAR,confirm:{title:'Arquivar produto?',text:'Texto de confirmação para teste de layout em telas pequenas.',ok:'Arquivar',danger:true,fn:()=>{}}})],
+      ];
+      const fails=[];let small=0,n=0;
+      for(const [name,fn] of steps){
+        if(name==='Menu'&&I.renderVals().navFull)continue;
+        fn();await sleep(260);n++;
+        const r=this.check(win);small=Math.max(small,r.small);
+        r.issues.forEach(i=>fails.push({text:`${name}: ${i}`}));
+      }
+      out.push({res:`${w} × ${h}`,pass:!fails.length,fails,n,small});
+      this.setState({resp:out.slice()});
+    }
+  }
+  renderVals(){
+    const f=this.state.func,r=this.state.resp;
+    return {
+      run:()=>this.run(),running:this.state.running,status:this.state.status,stage:this.stage,
+      func:f.map(t=>({name:t.name,info:t.info,hasInfo:!!t.info,label:t.pass?'PASS':'FAIL',bg:t.pass?'#DDF1EE':'#F8DEDB',fg:t.pass?'#17675F':'#9C2A20'})),
+      funcSummary:`${f.filter(t=>t.pass).length} de ${f.length} aprovados`,
+      resp:r.map(x=>({res:x.res,fails:(x.fails||[]).map(t=>typeof t==='string'?{text:t}:t),label:x.pass?'PASS':'FAIL',bg:x.pass?'#DDF1EE':'#F8DEDB',fg:x.pass?'#17675F':'#9C2A20',summary:`${x.n} estados verificados · ${x.small} botões com menos de 44 px (pior estado)`})),
+      smallList:this.state.smallList||'—',
+      respSummary:`${r.filter(x=>x.pass).length} de ${r.length} resoluções aprovadas`
+    };
+  }
+}
+</script>
+</body>
+</html>

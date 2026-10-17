@@ -1,0 +1,66 @@
+/* Tokens de design extraídos do protótipo aprovado (Claude Design). */
+:root {
+  /* Marca */
+  --c-cream: #fff8ee;
+  --c-ink: #3a2215;
+  --c-brown: #6b3419;
+  --c-orange: #c4610f;
+  --c-orange-hover: #a9520b;
+  --c-orange-deep: #8a3f05;
+  --c-orange-soft: #e8862a;
+  --c-peach: #fbe6cf;
+  --c-yellow: #f6d58a;
+  --c-teal: #1f8c83;
+  --c-teal-dark: #17675f;
+  --c-teal-mid: #2fa49a;
+  --c-teal-bg: #ddf1ee;
+  --c-teal-hover: #eaf6f4;
+  --c-teal-soft: #bfe3dd;
+
+  /* Texto */
+  --c-text-2: #5a4535;
+  --c-muted: #6e5546;
+  --c-muted-2: #7a6455;
+
+  /* Superfícies e linhas */
+  --c-white: #fff;
+  --c-line: #eedfcb;
+  --c-line-strong: #e3d3be;
+  --c-line-soft: #f3eadf;
+  --c-line-dashed: #c9b49c;
+  --c-hover-beige: #f6e8d3;
+  --c-admin-bg: #faf5ee;
+  --c-admin-hover: #fbf3e8;
+  --c-admin-nav-hover: #fbf0e2;
+  --c-row-bg: #fcf8f2;
+  --c-tag-bg: #f6efe6;
+
+  /* Estados */
+  --c-warn-bg: #fff4e2;
+  --c-warn-fg: #6e4a20;
+  --c-low-bg: #fcebd0;
+  --c-low-fg: #8a4b00;
+  --c-danger: #9c2a20;
+  --c-danger-bg: #f8dedb;
+  --c-danger-fg: #7a2119;
+  --c-danger-hover: #fbedeb;
+  --c-error: #b3261e;
+  --c-neutral-bg: #ede6dd;
+  --c-neutral-bg-2: #f1ece6;
+  --c-neutral-fg: #6e5b4c;
+  --c-refund-bg: #e3e9f6;
+  --c-refund-fg: #2f4b8a;
+
+  /* Tipografia */
+  --font-body: 'Nunito Sans', system-ui, sans-serif;
+  --font-display: 'Baloo 2', sans-serif;
+  --font-icon: 'Material Symbols Rounded';
+  --font-mono: ui-monospace, Menlo, monospace;
+
+  /* Layout */
+  --container: 1200px;
+  --gutter: 16px;
+  --overlay: rgba(42, 24, 14, 0.5);
+
+  --shadow-card-hover: 0 14px 30px -14px rgba(58, 34, 21, 0.3);
+}

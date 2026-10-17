@@ -1,0 +1,100 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--c-cream);
+  color: var(--c-ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+/* `clip` (e não `hidden`) evita rolagem horizontal sem transformar html/body em contêiner
+   de rolagem — o que quebraria os cabeçalhos com position: sticky. */
+html,
+body {
+  overflow-x: clip;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+a {
+  color: var(--c-teal-dark);
+}
+a:hover {
+  color: var(--c-orange);
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  color: inherit;
+}
+input,
+select,
+textarea {
+  font-size: 16px; /* evita zoom automático no iOS */
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+
+:focus-visible {
+  outline: 3px solid var(--c-teal-mid);
+  outline-offset: 2px;
+}
+
+img {
+  max-width: 100%;
+}
+
+.icon {
+  font-family: var(--font-icon);
+  font-weight: 400;
+  font-style: normal;
+  line-height: 1;
+  display: inline-block;
+  width: 1em;
+  overflow: hidden;
+  white-space: nowrap;
+  letter-spacing: normal;
+  text-transform: none;
+  word-wrap: normal;
+  direction: ltr;
+  font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  flex-shrink: 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
