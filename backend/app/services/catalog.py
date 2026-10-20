@@ -6,7 +6,7 @@ from app.core.errors import Conflict, NotFound, ValidationFailed
 from app.domain.catalog import active_category_ids, is_product_visible, normalize_text, visible_products
 from app.domain.inventory import initial_stock_movement
 from app.domain.models import DEFAULT_SETTINGS, Category, Product, StoreSettings
-from app.repositories.base import InventoryTransaction, Repositories
+from app.repositories.base import CategoryNameTaken, InventoryTransaction, Repositories
 from app.schemas.catalog import CategoryCreate, CategoryUpdate, ProductCreate, ProductUpdate
 from app.services.common import Clock, IdFactory, new_id, utc_now
 
@@ -49,30 +49,26 @@ class CategoryService:
         return sorted(self._repos.categories.list(), key=lambda c: normalize_text(c.name))
 
     def create(self, data: CategoryCreate) -> Category:
-        self._ensure_unique_name(data.name, exclude_id=None)
         category = Category(id=self._ids(), name=data.name, icon=data.icon, active=True)
-        self._repos.categories.save(category)
+        self._save(category)
         return category
 
     def update(self, category_id: str, data: CategoryUpdate) -> Category:
         current = self._repos.categories.get(category_id)
         if current is None:
             raise NotFound("Categoria não encontrada.")
-        changes = data.changes()
-        if "name" in changes:
-            self._ensure_unique_name(changes["name"], exclude_id=category_id)
-        updated = replace(current, **changes)
-        self._repos.categories.save(updated)
+        updated = replace(current, **data.changes())
+        self._save(updated)
         return updated
 
-    def _ensure_unique_name(self, name: str, exclude_id: str | None) -> None:
-        # Sem transação: duas criações simultâneas com o mesmo nome são improváveis num painel
-        # de poucos usuários. No Firestore, um índice de nome normalizado pode tornar isto estrito.
-        key = normalize_text(name)
-        if any(c.id != exclude_id and normalize_text(c.name) == key for c in self._repos.categories.list()):
+    def _save(self, category: Category) -> None:
+        # A unicidade do nome é garantida atomicamente pelo repositório (não por consulta prévia).
+        try:
+            self._repos.categories.save(category)
+        except CategoryNameTaken:
             raise Conflict(
                 "Já existe uma categoria com esse nome.", field_errors={"name": "Já existe uma categoria com esse nome."}
-            )
+            ) from None
 
 
 class ProductService:

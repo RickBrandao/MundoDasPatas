@@ -114,11 +114,20 @@ DEFAULT_SETTINGS = StoreSettings(
 
 @dataclass(frozen=True, slots=True)
 class IdempotencyRecord:
-    """Resultado de uma operação sensível já aplicada, para responder a repetições sem reaplicar."""
+    """Operação sensível já aplicada e a resposta original, para responder a repetições sem reaplicar.
+
+    `response` é o snapshot imutável (texto JSON) da resposta original. O domínio não interpreta
+    o conteúdo: o formato pertence ao contrato HTTP e é identificado por `response_version`.
+    Depois de `expires_at` o registro deixa de valer (e pode ser removido pelo TTL do Firestore).
+    """
 
     key: str
     operation: str
     actor_uid: str
     request_hash: str
+    # ID do recurso criado ou alterado pela operação (venda ou movimentação).
     result_id: str
+    response: str
+    response_version: int
     created_at: datetime
+    expires_at: datetime

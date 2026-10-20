@@ -36,7 +36,7 @@ def test_transaction_commits_all_writes(repos: Repositories) -> None:
         tx.put_product(product("p1"))
         tx.put_sale(sale("s1", 0))
         tx.add_movements([movement("m1", "p1", 0)])
-        tx.put_idempotency(IdempotencyRecord("k", "op", "admin", "h", "s1", NOW))
+        tx.put_idempotency(IdempotencyRecord("k", "op", "admin", "h", "s1", "{}", 1, NOW, NOW + timedelta(hours=24)))
         return "ok"
 
     assert repos.inventory.run_in_transaction(op) == "ok"

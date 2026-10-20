@@ -4,6 +4,7 @@ Regra geral: em `staging` e `production` a configuração é validada de forma e
 e a aplicação **não inicia** se algo inseguro ou incompleto for detectado (fail-closed).
 """
 
+import json
 from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated, Self
@@ -30,6 +31,19 @@ def _split_csv(value: object) -> object:
     if isinstance(value, str):
         return [item.strip() for item in value.split(",") if item.strip()]
     return value
+
+
+def _is_service_account(raw: str) -> bool:
+    try:
+        info = json.loads(raw)
+    except ValueError:
+        return False
+    required = ("project_id", "client_email", "private_key")
+    return (
+        isinstance(info, dict)
+        and info.get("type") == "service_account"
+        and all(isinstance(info.get(k), str) and info[k] for k in required)
+    )
 
 
 class Settings(BaseSettings):
@@ -86,6 +100,14 @@ class Settings(BaseSettings):
         if self.firebase_auth_emulator_host:
             problems.append(
                 "FIREBASE_AUTH_EMULATOR_HOST não pode estar definido (desativa a verificação de assinatura dos tokens)."
+            )
+        if self.firebase_service_account_json is not None and not _is_service_account(
+            self.firebase_service_account_json.get_secret_value()
+        ):
+            # Só a estrutura é conferida (sem rede); a validade da chave aparece na primeira verificação (503).
+            problems.append(
+                "FIREBASE_SERVICE_ACCOUNT_JSON não é uma conta de serviço válida "
+                "(objeto JSON com type=service_account, project_id, client_email e private_key)."
             )
         if "*" in self.cors_origins:
             problems.append("CORS_ORIGINS não pode conter '*'.")

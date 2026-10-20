@@ -158,16 +158,19 @@ def test_sale_flow_with_cancellation(client: TestClient, state: MemoryState) -> 
     types = [m["type"] for m in client.get("/api/v1/admin/stock/movements", headers=ADMIN).json()]
     assert types.count("venda") == 2
 
-    cancel = client.post(f"/api/v1/admin/sales/{sale['id']}/cancel", headers=ADMIN)
+    cancel = client.post(f"/api/v1/admin/sales/{sale['id']}/cancel", headers=key(2))
     assert cancel.status_code == 200
     assert cancel.json()["status"] == "cancelada" and cancel.json()["cancelledBy"] == ADMIN_UID
     assert stock(client, "p1") == 10 and stock(client, "brinquedo") == 1
 
-    twice = client.post(f"/api/v1/admin/sales/{sale['id']}/cancel", headers=ADMIN)
+    # Mesma chave: repetição segura (resposta original). Chave nova: novo cancelamento, recusado.
+    again = client.post(f"/api/v1/admin/sales/{sale['id']}/cancel", headers=key(2))
+    assert again.status_code == 200 and again.headers["idempotent-replayed"] == "true"
+    twice = client.post(f"/api/v1/admin/sales/{sale['id']}/cancel", headers=key(3))
     assert twice.status_code == 409
     assert stock(client, "p1") == 10  # estorno não duplicado
 
-    assert client.post("/api/v1/admin/sales/nao-existe/cancel", headers=ADMIN).status_code == 404
+    assert client.post("/api/v1/admin/sales/nao-existe/cancel", headers=key(4)).status_code == 404
 
 
 def test_sale_with_insufficient_stock_changes_nothing(client: TestClient, state: MemoryState) -> None:

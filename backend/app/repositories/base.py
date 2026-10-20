@@ -18,10 +18,23 @@ from typing import Protocol
 from app.domain.models import Category, IdempotencyRecord, Product, Sale, StockMovement, StoreSettings
 
 
+class CategoryNameTaken(Exception):
+    """Outra categoria já usa um nome equivalente (mesma forma normalizada)."""
+
+
 class CategoryRepository(Protocol):
     def list(self) -> list[Category]: ...
     def get(self, category_id: str) -> Category | None: ...
-    def save(self, category: Category) -> None: ...
+
+    def save(self, category: Category) -> None:
+        """Cria ou substitui a categoria garantindo, de forma atômica, a unicidade do nome.
+
+        Nomes são comparados por `normalize_text` (sem acentos e sem caixa). Levanta
+        `CategoryNameTaken` se outra categoria já usa o nome; manter o próprio nome é permitido
+        e o nome anterior fica livre após uma renomeação. No Firestore: transação com a
+        reserva `category_name_claims/{sha256(nome normalizado)}` (ver README).
+        """
+        ...
 
 
 class ProductRepository(Protocol):

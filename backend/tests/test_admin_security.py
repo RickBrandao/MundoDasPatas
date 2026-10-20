@@ -1,6 +1,7 @@
 from typing import Any
 
 import pytest
+from firebase_admin import auth as real_auth
 
 from app.api.dependencies import get_token_verifier
 from app.core import security
@@ -144,13 +145,12 @@ class _FakeAuth:
     """Imita `firebase_admin.auth` sem rede. As classes de erro são as reais do SDK."""
 
     def __init__(self, outcome: Any) -> None:
-        from firebase_admin import auth
-
-        self.InvalidIdTokenError = auth.InvalidIdTokenError
-        self.UserDisabledError = auth.UserDisabledError
-        self.CertificateFetchError = auth.CertificateFetchError
         self.outcome = outcome
         self.kwargs: dict[str, Any] = {}
+
+    def __getattr__(self, name: str) -> Any:
+        # Classes de erro e demais atributos vêm do módulo real.
+        return getattr(real_auth, name)
 
     def verify_id_token(self, token: str, **kwargs: Any) -> dict[str, Any]:
         self.kwargs = kwargs

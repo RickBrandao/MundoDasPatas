@@ -12,8 +12,9 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from app.domain.catalog import normalize_text
 from app.domain.models import Category, IdempotencyRecord, Product, Sale, StockMovement, StoreSettings
-from app.repositories.base import Repositories
+from app.repositories.base import CategoryNameTaken, Repositories
 
 
 @dataclass
@@ -43,7 +44,12 @@ class MemoryCategoryRepository:
         return self._s.categories.get(category_id)
 
     def save(self, category: Category) -> None:
+        # Verificação e gravação na mesma seção crítica: duas gravações simultâneas de nomes
+        # equivalentes não conseguem ambas ver o nome como livre.
+        name_key = normalize_text(category.name)
         with self._s.lock:
+            if any(c.id != category.id and normalize_text(c.name) == name_key for c in self._s.categories.values()):
+                raise CategoryNameTaken()
             self._s.categories[category.id] = category
 
 

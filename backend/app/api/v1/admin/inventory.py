@@ -3,7 +3,6 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.api.dependencies import AdminDep, IdempotencyKey, get_inventory_service
-from app.schemas.catalog import ProductAdminOut
 from app.schemas.inventory import SaleCreate, SaleOut, StockMovementCreate, StockMovementOut, StockMovementResult
 from app.services.inventory import InventoryService
 
@@ -31,9 +30,8 @@ def create_movement(
     data: StockMovementCreate, admin: AdminDep, key: IdempotencyKey, inventory: InventoryDep, response: Response
 ) -> StockMovementResult:
     outcome = inventory.move_stock(data, admin.uid, key)
-    movement, product = outcome.value
     response.headers[REPLAYED_HEADER] = str(outcome.replayed).lower()
-    return StockMovementResult(movement=StockMovementOut.model_validate(movement), product=ProductAdminOut.from_domain(product))
+    return outcome.value
 
 
 @router.get("/sales", tags=["Admin · Vendas"], summary="Vendas (mais recentes primeiro)")
@@ -45,9 +43,11 @@ def list_sales(inventory: InventoryDep, limit: Limit = 100) -> list[SaleOut]:
 def create_sale(data: SaleCreate, admin: AdminDep, key: IdempotencyKey, inventory: InventoryDep, response: Response) -> SaleOut:
     outcome = inventory.register_sale(data, admin.uid, key)
     response.headers[REPLAYED_HEADER] = str(outcome.replayed).lower()
-    return SaleOut.model_validate(outcome.value)
+    return outcome.value
 
 
 @router.post("/sales/{sale_id}/cancel", tags=["Admin · Vendas"], summary="Cancelar venda e devolver itens ao estoque")
-def cancel_sale(sale_id: str, admin: AdminDep, inventory: InventoryDep) -> SaleOut:
-    return SaleOut.model_validate(inventory.cancel_sale(sale_id, admin.uid))
+def cancel_sale(sale_id: str, admin: AdminDep, key: IdempotencyKey, inventory: InventoryDep, response: Response) -> SaleOut:
+    outcome = inventory.cancel_sale(sale_id, admin.uid, key)
+    response.headers[REPLAYED_HEADER] = str(outcome.replayed).lower()
+    return outcome.value

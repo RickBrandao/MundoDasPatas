@@ -52,7 +52,7 @@ consultar a API pública. As rotas administrativas continuam protegidas: sem tok
 ### Testes e qualidade
 
 ```powershell
-python -m pytest              # 186 testes, sem rede e sem Firebase real
+python -m pytest              # 249 testes, sem rede e sem Firebase real
 ruff check .                  # lint
 ruff format --check .         # formatação
 ```
@@ -136,7 +136,7 @@ passa a usar dados reais quando o repositório Firestore for implementado. Com
 | POST | `/api/v1/admin/stock/movements` | admin + `Idempotency-Key` | protegido · funcional (memória) |
 | GET | `/api/v1/admin/sales?limit=` | admin | protegido · funcional (memória) |
 | POST | `/api/v1/admin/sales` | admin + `Idempotency-Key` | protegido · funcional (memória) |
-| POST | `/api/v1/admin/sales/{id}/cancel` | admin | protegido · funcional (memória) |
+| POST | `/api/v1/admin/sales/{id}/cancel` | admin + `Idempotency-Key` | protegido · funcional (memória) |
 | GET | `/api/v1/admin/dashboard` | admin | protegido · funcional (memória) |
 | GET | `/api/v1/admin/settings` | admin | protegido · funcional (memória) |
 | PUT | `/api/v1/admin/settings` | admin | protegido · funcional (memória) |
@@ -168,11 +168,11 @@ ou vazio); data URLs, usadas na demo, são recusadas. O upload irá para o Cloud
 | 403 | `forbidden` | usuário autenticado sem permissão administrativa |
 | 404 | `not_found` | recurso inexistente ou oculto |
 | 405 | `method_not_allowed` | método não suportado |
-| 409 | `conflict`, `insufficient_stock`, `idempotency_key_reused` | conflito com o estado atual |
+| 409 | `conflict`, `insufficient_stock`, `idempotency_key_reused`, `idempotency_replay_unavailable` | conflito com o estado atual (ver seção 6) |
 | 422 | `validation_error` | campos inválidos (`fieldErrors` no mesmo formato do frontend) |
 | 500 | `internal_error` | erro inesperado (detalhes só no log do servidor) |
 | 501 | `not_implemented` | persistência real ainda não disponível |
-| 503 | `service_unavailable` | autenticação não configurada ou indisponível |
+| 503 | `service_unavailable`, `auth_unavailable` | autenticação não configurada, credenciais inválidas ou Firebase indisponível |
 
 ---
 
@@ -229,6 +229,34 @@ ou vazio); data URLs, usadas na demo, são recusadas. O upload irá para o Cloud
    então nenhuma rota nova fica desprotegida por esquecimento. Um teste percorre o OpenAPI e
    confirma `401`/`403`/`503` em todas as rotas administrativas.
 
+### Falhas do Firebase: 401 × 503 × 500
+
+`FirebaseTokenVerifier` (`core/security.py`) classifica as exceções reais do firebase-admin 7.x.
+Em **todos** os casos o acesso é negado; muda só a resposta, para o frontend saber se deve pedir
+novo login (401) ou tentar mais tarde (503).
+
+| Situação | Exceção | Status |
+| --- | --- | --- |
+| Token inválido, malformado, de outro projeto (`aud`) | `InvalidIdTokenError`, `ValueError` | 401 |
+| Token expirado / revogado | `ExpiredIdTokenError` / `RevokedIdTokenError` | 401 |
+| Usuário desativado / excluído | `UserDisabledError` / `UserNotFoundError` | 401 |
+| Certificados públicos inacessíveis | `CertificateFetchError` | 503 |
+| Rede, timeout, erro do serviço | `UnavailableError`, `DeadlineExceededError`, `UnknownError`, `InternalError`, `ResourceExhaustedError` | 503 |
+| Credencial administrativa recusada (consulta de revogação) | `UnauthenticatedError`, `PermissionDeniedError` | 503 |
+| ADC ausente, credencial malformada, falha ao renovar token | `google.auth.exceptions.GoogleAuthError` (inclui `DefaultCredentialsError`, `RefreshError`) | 503 |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` inválido / erro em `initialize_app` | `FirebaseInitFailed` (`core/firebase.py`) | 503 |
+| Firebase não configurado | — | 503 |
+| Qualquer outra exceção (ex.: `InvalidArgumentError` genérico) | não capturada | 500 |
+
+- `GoogleAuthError` é tratado **antes** de `ValueError`: algumas exceções de credencial do
+  `google.auth` (ex.: `MalformedError`) também herdam de `ValueError` e virariam 401 por engano.
+- Logs registram só o **tipo** da exceção (nível `INFO` para 401, `ERROR` para 503): mensagens do
+  SDK podem conter partes do token ou da credencial.
+- Falha na inicialização não deixa o SDK meio inicializado; a próxima requisição tenta de novo.
+  A inicialização é única por processo (lock + `get_app`), testada com 8 threads.
+- O JSON da conta de serviço precisa ser um **objeto**: `credentials.Certificate()` trataria uma
+  string como caminho de arquivo e tentaria abri-lo.
+
 ### Estratégia de autorização
 
 **Allowlist de UIDs no servidor** (`ADMIN_ALLOWED_UIDS`). É o modelo mais simples e seguro para
@@ -249,7 +277,10 @@ um petshop com um ou poucos usuários:
   `get_token_verifier` explicitamente via `app.dependency_overrides`, o que só é possível em código.
 - Em `staging`/`production` a aplicação **não inicia** se: faltar `FIREBASE_PROJECT_ID`, houver
   `DATA_BACKEND=memory`, `FIREBASE_AUTH_EMULATOR_HOST` estiver definido (ele faz o SDK aceitar tokens
-  não assinados), `CORS_ORIGINS` contiver `*` ou (em produção) origens `http://`.
+  não assinados), `CORS_ORIGINS` contiver `*`, (em produção) origens `http://`, ou
+  `FIREBASE_SERVICE_ACCOUNT_JSON` não tiver a estrutura de uma conta de serviço (objeto JSON com
+  `type=service_account`, `project_id`, `client_email`, `private_key`). Só a estrutura é conferida,
+  sem rede: chave revogada ou ADC ausente aparecem na primeira verificação, como `503`.
 
 ### Credenciais e dados sensíveis
 
@@ -269,7 +300,7 @@ um petshop com um ou poucos usuários:
 
 | Protocol | Operações |
 | --- | --- |
-| `CategoryRepository` | `list`, `get`, `save` |
+| `CategoryRepository` | `list`, `get`, `save` (garante nome único de forma atômica; `CategoryNameTaken`) |
 | `ProductRepository` | `list`, `get` (somente leitura) |
 | `SaleRepository` | `list(limit, since)`, `get` |
 | `StockMovementRepository` | `list(limit, product_id)`, `get` (imutáveis) |
@@ -282,10 +313,11 @@ um petshop com um ou poucos usuários:
 | --- | --- | --- |
 | `products` | `{id}` | campos snake_case ou camelCase (decidir na implementação), timestamps nativos |
 | `categories` | `{id}` | |
+| `category_name_claims` | `sha256(normalize_text(nome))` | `{category_id}`; reserva do nome (ver "Unicidade de categorias") |
 | `sales` | `{id}` | índice em `created_at` |
 | `stock_movements` | `{id}` | índices em `created_at` e (`product_id`, `created_at`) |
 | `settings` | `store` | documento único |
-| `idempotency_keys` | hash(`operation`, `actor_uid`, `key`) | política de TTL do Firestore (ex.: `expires_at` = criação + 7 dias) |
+| `idempotency_keys` | `sha256(operation, actor_uid, key)` | snapshot da resposta; política de TTL do Firestore no campo `expires_at` |
 
 - `FIRESTORE_DATABASE_ID` permite usar um banco nomeado (ex.: separar homologação de produção).
 - Dados de demonstração **não** devem ser inseridos em produção. Uma importação inicial, se
@@ -300,22 +332,101 @@ um petshop com um ou poucos usuários:
 - **Duas vendas simultâneas do último item:** o Firestore detecta que o documento do produto mudou e
   repete a transação; na repetição o estoque lido é 0 e a segunda venda recebe `409 insufficient_stock`.
   (Coberto por teste concorrente com 8 threads sobre o repositório em memória.)
-- **Cancelamento:** lê a venda dentro da transação; se já está `cancelada`, responde `409`. Dois
-  cancelamentos simultâneos não estornam duas vezes.
+- **Cancelamento:** lê a chave de idempotência, a venda e os produtos → se a chave já existe, devolve
+  o snapshot; se a venda já está `cancelada`, responde `409`; senão grava venda, estoque, estornos e
+  chave. Dois cancelamentos simultâneos não estornam duas vezes (testado com 8 threads).
 - **Edição de produto:** relê o produto dentro da transação, para não sobrescrever um estoque alterado em paralelo.
 - A função da transação não pode ter efeitos colaterais externos (o Firestore pode repeti-la).
 
 ### Idempotência
 
-`POST /admin/sales` e `POST /admin/stock/movements` exigem o cabeçalho `Idempotency-Key`
-(8–128 caracteres, ex.: `crypto.randomUUID()`):
+`POST /admin/sales`, `POST /admin/stock/movements` e `POST /admin/sales/{id}/cancel` exigem o
+cabeçalho `Idempotency-Key` (8–128 caracteres `A-Z a-z 0-9 _ . : -`, ex.: `crypto.randomUUID()`).
+O escopo da chave é **(operação, usuário)**: a mesma chave usada por outro administrador ou em
+outra operação é independente.
 
-- Mesma chave + mesmo usuário + mesmo corpo → devolve o resultado original com
-  `Idempotent-Replayed: true`, sem reaplicar (duplo clique, retry após falha de rede).
-- Mesma chave com outro corpo → `409 idempotency_key_reused`.
-- A chave é gravada na mesma transação da operação: ou ambas existem, ou nenhuma.
-- O frontend deve gerar a chave ao **abrir** a confirmação da operação e reutilizá-la em novas tentativas.
-- Cancelamento é naturalmente idempotente (verificação de status na transação).
+| Requisição | Resposta |
+| --- | --- |
+| Chave nova | Executa. `201` (venda, movimentação) ou `200` (cancelamento), `Idempotent-Replayed: false` |
+| Mesma chave, mesmo corpo (no cancelamento: mesma venda) | **Snapshot da resposta original**, mesmo status, `Idempotent-Replayed: true`; nada é reaplicado |
+| Mesma chave, outro corpo / outra venda | `409 idempotency_key_reused`; nada é aplicado |
+| Operação recusada (ex.: estoque insuficiente) | Erro normal; a chave **não** é registrada e pode ser reutilizada |
+| Cancelamento com chave nova de venda já cancelada | `409 conflict`; estoque inalterado |
+
+```http
+POST /api/v1/admin/sales/3f2a.../cancel
+Authorization: Bearer <Firebase ID Token>
+Idempotency-Key: 0b8e6c1e-5d1f-4c3a-9a57-2f0d7f1b9c44
+
+→ 200  Idempotent-Replayed: false   {"id": "3f2a...", "status": "cancelada", ...}
+(resposta perdida; o navegador repete com a MESMA chave)
+→ 200  Idempotent-Replayed: true    {mesmo JSON da primeira resposta}
+```
+
+O frontend deve gerar a chave ao **abrir** a confirmação da operação e reutilizá-la em todas as
+novas tentativas daquela ação; uma nova ação usa uma nova chave.
+
+**Snapshot.** O registro (`IdempotencyRecord`) guarda operação, usuário, chave, hash do corpo,
+ID do recurso, `created_at`, `expires_at` e a **resposta original** serializada (`response`, texto
+JSON). A repetição desserializa esse texto — nunca consulta o estado atual. Ex.: entrada K1 (10 → 12),
+depois entrada K2 (→ 15): repetir K1 devolve `stock: 12`. Venda K1 depois cancelada: repetir K1
+devolve a venda `concluida`, sem criar outra venda nem nova baixa.
+
+- O registro é gravado na mesma transação da operação: ou ambos existem, ou nenhum.
+- **Acoplamento assumido:** o snapshot é o DTO HTTP (`SaleOut`, `StockMovementResult`), gerado
+  pelo serviço; o domínio só o trata como texto opaco. O formato tem versão (`response_version`,
+  constante `SNAPSHOT_VERSION` em `services/inventory.py`). Ao mudar um desses DTOs de forma
+  incompatível, incremente a versão: registros antigos passam a responder
+  `409 idempotency_replay_unavailable` (a operação já foi aplicada; o cliente deve consultar o recurso)
+  — **nunca** são reaplicados.
+
+**Expiração (`IDEMPOTENCY_TTL` = 24 horas).** `expires_at = created_at + 24 h`, com o relógio do servidor
+no momento da operação.
+
+- Antes de `expires_at`: repetições devolvem o snapshot; corpo diferente recebe `409`.
+- A partir de `expires_at`: o registro é **ignorado** mesmo que ainda exista (o TTL do Firestore
+  apaga com atraso de até ~24 h, e o comportamento não pode depender disso). A chave volta a ser
+  nova: uma repetição de venda ou de movimentação **seria executada outra vez**. O cancelamento
+  continua seguro (a venda já está `cancelada` → `409`), mas sem o snapshot.
+- Portanto a proteção contra repetição vale **por 24 horas**, não indefinidamente. Retries
+  automáticos e duplos cliques acontecem em segundos; 24 h cobrem também uma aba reaberta no dia seguinte.
+- Não há limpeza agendada: em memória os registros vivem até o processo reiniciar; no Firestore, a
+  política de TTL no campo `expires_at` fará a remoção.
+
+### Unicidade de categorias
+
+Dois nomes são equivalentes quando `normalize_text` (sem acentos, sem diferença de caixa) é igual:
+`Ração`, `racao` e `RAÇÃO` são o mesmo nome. A unicidade é garantida no `save` do repositório, de
+forma atômica — não por consulta seguida de inserção no serviço:
+
+- Criação ou renomeação para nome usado por outra categoria → `409` com
+  `fieldErrors.name`; nada da requisição é aplicado (nem outros campos do mesmo `PATCH`).
+- Manter o próprio nome (inclusive mudando só maiúsculas/acentos) é permitido.
+- Depois de uma renomeação, o nome antigo fica livre para outra categoria.
+- **Memória:** verificação e gravação na mesma seção crítica (o lock já usado pelos repositórios).
+- **Firestore:** índices não impõem unicidade. `save` será uma transação que lê a categoria atual e
+  `category_name_claims/{sha256(nome normalizado)}`; se a reserva pertence a outro ID → conflito;
+  senão grava a categoria, cria a reserva nova e, numa renomeação, apaga a reserva antiga — tudo
+  na mesma transação. Duas transações concorrentes sobre a mesma reserva: o Firestore repete uma
+  delas, que então encontra a reserva ocupada. O hash evita caracteres inválidos em IDs de documento.
+
+### Considerações para o repositório Firestore
+
+Os testes em memória validam a lógica, **não** o comportamento transacional do Firestore. Na
+implementação real será preciso confirmar, com o emulador:
+
+- Ordem leituras → escritas: as funções de transação já leem chave, venda e produtos antes de
+  qualquer escrita, como o Firestore exige.
+- Reexecução automática: `now` e os IDs da venda/movimentação são fixados antes da transação; o
+  snapshot é derivado do que foi lido; a função não tem efeitos externos. IDs das movimentações
+  de venda/estorno são gerados dentro da função (aceitável: só a tentativa confirmada grava).
+- `put_idempotency` deve usar `set` no ID determinístico `sha256(operation, actor_uid, key)`, para
+  sobrescrever um registro expirado.
+- Limite de 1 MiB por documento: o maior snapshot (venda com 100 itens) fica muito abaixo.
+- Configurar a política de TTL do campo `expires_at` em `idempotency_keys` (o TTL é feito pelo
+  Firestore, não pelo código).
+- A edição de categoria lê a categoria atual fora da transação (comportamento anterior, last-write-wins
+  para `active`/`icon`); a unicidade do nome, porém, é decidida dentro da transação.
 
 ### WhatsApp
 
@@ -401,7 +512,7 @@ o firebase-admin traz `google-cloud-firestore` e `grpcio`.
 
 1. Criar `src/services/httpStoreApi.ts` implementando `StoreApi` com `fetch`, convertendo datas
    ISO ↔ ms, mapeando `{error: {message, fieldErrors}}` para `ApiResult` e enviando
-   `Idempotency-Key` (gerada por ação) em vendas e movimentações.
+   `Idempotency-Key` (gerada por ação) em vendas, movimentações e cancelamentos.
 2. Separar o carregamento público do administrativo: a vitrine usa `GET /public/catalog`;
    o painel compõe `GET /admin/products|categories|sales|stock/movements|settings` após o login.
    Hoje `StoreProvider` carrega um único `StoreData` para as duas áreas.
@@ -423,7 +534,8 @@ o firebase-admin traz `google-cloud-firestore` e `grpcio`.
 - **Firebase:** criar projeto, contas administrativas, conta de serviço, variáveis de ambiente.
 - **Autenticação real:** login no frontend e teste ponta a ponta com token real (ou Emulator Suite).
 - **Firestore:** implementar `repositories/firestore.py` seguindo os Protocols, regras de segurança,
-  índices, TTL de idempotência; testes de integração com o emulador.
+  índices, TTL de idempotência (`expires_at`), reservas `category_name_claims`; testes de
+  integração com o emulador (transações concorrentes, reexecução, unicidade, idempotência).
 - **Imagens:** upload para o Cloud Storage com URLs assinadas ou regras de Storage.
 - **Integração React:** itens da seção 10.
 - **Homologação:** deploy na Vercel (staging), domínio, CORS de homologação, monitoramento de logs.

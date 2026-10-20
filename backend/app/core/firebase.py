@@ -8,6 +8,7 @@
 """
 
 import json
+import logging
 import threading
 from typing import TYPE_CHECKING
 
@@ -19,11 +20,16 @@ if TYPE_CHECKING:
 
 APP_NAME = "mundo-das-patas"
 _lock = threading.Lock()
+logger = logging.getLogger("app.firebase")
 
 
 class FirebaseNotConfigured(ServiceUnavailable):
     code = "auth_unavailable"
     message = "Autenticação indisponível no momento."
+
+
+class FirebaseInitFailed(FirebaseNotConfigured):
+    """Credenciais ausentes, inválidas ou configuração recusada pelo SDK (503, nunca 500)."""
 
 
 def get_firebase_app(settings: Settings) -> "App":
@@ -39,18 +45,25 @@ def get_firebase_app(settings: Settings) -> "App":
         except ValueError:
             pass  # ainda não inicializado
 
-        if settings.firebase_service_account_json is not None:
-            try:
-                info = json.loads(settings.firebase_service_account_json.get_secret_value())
-            except json.JSONDecodeError:
-                # Não encadeia a exceção original: ela pode conter trechos do segredo.
-                raise RuntimeError("FIREBASE_SERVICE_ACCOUNT_JSON não contém um JSON válido.") from None
-            credential = credentials.Certificate(info)
-        else:
-            credential = credentials.ApplicationDefault()
+        from google.auth.exceptions import GoogleAuthError
 
-        return firebase_admin.initialize_app(
-            credential,
-            options={"projectId": settings.firebase_project_id},
-            name=APP_NAME,
-        )
+        try:
+            if settings.firebase_service_account_json is not None:
+                info = json.loads(settings.firebase_service_account_json.get_secret_value())
+                if not isinstance(info, dict):
+                    # Certificate() trataria uma string como caminho de arquivo.
+                    raise ValueError("a conta de serviço deve ser um objeto JSON")
+                credential = credentials.Certificate(info)
+            else:
+                # Preguiçosa: se o ADC não existir, o erro surge na verificação (tratado em security.py).
+                credential = credentials.ApplicationDefault()
+            return firebase_admin.initialize_app(
+                credential,
+                options={"projectId": settings.firebase_project_id},
+                name=APP_NAME,
+            )
+        except (ValueError, TypeError, GoogleAuthError) as exc:
+            # JSONDecodeError é ValueError. Não encadeia nem registra a mensagem: pode conter trechos do segredo.
+            # Nada fica inicializado: a próxima requisição tenta de novo.
+            logger.error("Falha ao inicializar o Firebase Admin SDK (credenciais ou configuração): %s", type(exc).__name__)
+            raise FirebaseInitFailed() from None
