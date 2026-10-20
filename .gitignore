@@ -12,3 +12,18 @@ npm-debug.log*
 .idea
 .DS_Store
 Thumbs.db
+
+# Backend Python
+backend/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Configuração e credenciais (nunca versionar)
+.env
+.env.*
+!.env.example
+*service-account*.json
+*serviceAccount*.json
+*firebase-adminsdk*.json

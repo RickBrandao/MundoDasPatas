@@ -1,0 +1,11 @@
+target-version = "py312"
+line-length = 130
+extend-exclude = [".venv"]
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM"]
+# S101: assert em testes. B008: Depends()/Query() em defaults é o padrão do FastAPI.
+ignore = ["S101", "B008"]
+
+[lint.per-file-ignores]
+"tests/*" = ["S105", "S106", "E501"]

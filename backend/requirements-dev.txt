@@ -1,0 +1,7 @@
+# Desenvolvimento local e testes.
+-r requirements.txt
+uvicorn==0.54.0
+pytest==9.1.1
+# Cliente HTTP do TestClient (Starlette 1.x usa httpx2, sucessor do HTTPX).
+httpx2==2.15.1
+ruff==0.17.1

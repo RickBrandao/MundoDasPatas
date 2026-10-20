@@ -43,12 +43,16 @@ public/assets/  logotipo, banner e as 25 ilustrações SVG (19 produtos + 6 cate
 - Dados salvos validados ao carregar; se estiverem corrompidos, a demo recomeça com os dados fictícios.
 - Falha ao gravar no navegador é avisada no painel; as alterações valem até recarregar.
 
-## Backend futuro
+## Backend (em desenvolvimento)
+
+A API FastAPI fica em [`backend/`](backend/README.md) — fundação, contratos, segurança e regras
+prontos e testados; banco (Firestore) e login (Firebase Authentication) ainda pendentes.
+**O site publicado continua usando apenas os dados demonstrativos.**
 
 A interface depende apenas do contrato `StoreApi` (`src/services/storeApi.ts`).
-Para usar uma API (ex.: FastAPI), crie outra implementação desse contrato e troque-a em
-`src/app/services.ts`. As funções de `src/domain/operations.ts` documentam as regras que o backend
-deve reproduzir.
+Na integração, uma implementação HTTP desse contrato substituirá a local em
+`src/app/services.ts` (plano em `backend/README.md`, seção 10). As funções de
+`src/domain/operations.ts` são a especificação das regras reproduzidas no backend.
 
 ## WhatsApp
 
