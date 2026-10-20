@@ -4,7 +4,8 @@ Fundação da API real do Mundo das Patas (TASK 04). O frontend React na raiz do
 **continua usando os dados demonstrativos** (`localStoreApi`) e o GitHub Pages não foi alterado.
 
 > **Situação:** arquitetura, contratos, segurança e regras de negócio prontos e testados.
-> **Ainda não há banco real** (Firestore) nem login real (Firebase Authentication configurado).
+> **Ainda não há banco real** (Firestore). O login do painel (TASK 05B) usa `GET /api/v1/admin/me`
+> — ver [`docs/autenticacao.md`](../docs/autenticacao.md).
 > Os repositórios em memória servem apenas para testes e desenvolvimento local.
 
 ## Sumário
@@ -52,7 +53,7 @@ consultar a API pública. As rotas administrativas continuam protegidas: sem tok
 ### Testes e qualidade
 
 ```powershell
-python -m pytest              # 266 testes, sem rede e sem Firebase real
+python -m pytest              # 289 testes, sem rede e sem Firebase real
 ruff check .                  # lint
 ruff format --check .         # formatação
 ```
@@ -126,6 +127,7 @@ passa a usar dados reais quando o repositório Firestore for implementado. Com
 | GET | `/api/v1/public/products/{id}` | público | funcional (memória) |
 | GET | `/api/v1/public/categories` | público | funcional (memória) |
 | GET | `/api/v1/public/store` | público | funcional (memória) |
+| GET | `/api/v1/admin/me` | admin | protegido · funcional (não usa repositórios) |
 | GET | `/api/v1/admin/products` | admin | protegido · funcional (memória) |
 | POST | `/api/v1/admin/products` | admin | protegido · funcional (memória) |
 | PATCH | `/api/v1/admin/products/{id}` | admin | protegido · funcional (memória) |
@@ -140,6 +142,11 @@ passa a usar dados reais quando o repositório Firestore for implementado. Com
 | GET | `/api/v1/admin/dashboard` | admin | protegido · funcional (memória) |
 | GET | `/api/v1/admin/settings` | admin | protegido · funcional (memória) |
 | PUT | `/api/v1/admin/settings` | admin | protegido · funcional (memória) |
+
+`GET /api/v1/admin/me` responde só `{"uid": "<uid verificado>"}`. Serve para o frontend confirmar a
+autorização antes de abrir o painel: `401` sem token/token inválido, expirado ou revogado; `403` fora
+de `ADMIN_ALLOWED_UIDS`; `503` Firebase indisponível ou não configurado. Usa a mesma dependência
+`require_admin` do roteador e não depende de persistência (funciona com `DATA_BACKEND=firestore`).
 
 Upload de imagens: **contrato futuro, sem rota.** O produto guarda apenas `imageUrl` (`https://`
 ou vazio); data URLs, usadas na demo, são recusadas. O upload irá para o Cloud Storage.
@@ -564,7 +571,8 @@ o firebase-admin traz `google-cloud-firestore` e `grpcio`.
 4. `ProductFormInput` envia textos (`price`, `stock`, `minStock`): o cliente HTTP converte com
    `parseBRL`/`parseInt` antes de enviar. `saveProduct` com `id` vira `PATCH`, sem `stock`.
 5. `toggleCategory` → `PATCH /admin/categories/{id}` com `{active}`; `patchProduct` → `PATCH` com as flags.
-6. Login administrativo com Firebase JS SDK, `getIdToken()` em cada chamada, tratamento de 401/403.
+6. ~~Login administrativo com Firebase JS SDK~~ — feito na TASK 05B (`src/features/auth`,
+   `src/services/auth/adminHttp.ts`, que já obtém/renova o token pelo SDK e trata 401).
 7. Exibir um código curto de venda (ex.: últimos caracteres do id) no lugar de `V-0001`, ou
    criar um número sequencial em transação, se o cliente fizer questão.
 8. Escolher a implementação em `src/app/services.ts` por variável de build (`VITE_API_URL`),
@@ -574,8 +582,9 @@ o firebase-admin traz `google-cloud-firestore` e `grpcio`.
 
 ## 11. Pendências
 
-- **Firebase:** criar projeto, contas administrativas, conta de serviço, variáveis de ambiente.
-- **Autenticação real:** login no frontend e teste ponta a ponta com token real (ou Emulator Suite).
+- **Firebase:** credenciais do servidor (ADC ou conta de serviço) e `backend/.env` locais — ver
+  [`docs/autenticacao.md`](../docs/autenticacao.md).
+- **Autenticação real:** login implementado (TASK 05B); falta o smoke test ponta a ponta com o usuário real.
 - **Firestore:** implementar `repositories/firestore.py` seguindo os Protocols, regras de segurança,
   índices, TTL de idempotência (`expires_at`), reservas `category_name_claims`; testes de
   integração com o emulador (transações concorrentes, reexecução, unicidade, idempotência).

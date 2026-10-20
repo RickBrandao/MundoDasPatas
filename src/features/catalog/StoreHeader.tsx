@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useCart, useUi } from '../../app/contexts';
+import { useAdminAccess, useCart, useUi } from '../../app/contexts';
 import { Icon } from '../../components/Icon';
 import { asset } from '../../components/productArt';
 import { NAV_LINKS, useOpenAdmin } from './navigation';
@@ -8,6 +8,7 @@ export function StoreHeader() {
   const { count } = useCart();
   const { setCartOpen, goToSection } = useUi();
   const openAdmin = useOpenAdmin();
+  const demo = useAdminAccess().mode === 'demo';
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -38,7 +39,7 @@ export function StoreHeader() {
         </nav>
         <button type="button" className="store-header__admin" onClick={openAdmin}>
           <Icon name="admin_panel_settings" />
-          Painel (demo)
+          {demo ? 'Painel (demo)' : 'Painel'}
         </button>
         <button
           type="button"
@@ -79,7 +80,7 @@ export function StoreHeader() {
             }}
           >
             <Icon name="admin_panel_settings" size={22} />
-            Acessar painel (demonstração)
+            {demo ? 'Acessar painel (demonstração)' : 'Acessar painel'}
           </button>
         </nav>
       )}

@@ -8,7 +8,7 @@ import { App } from './App';
 
 function renderApp(hash = '#/', storage: KeyValueStorage = createMemoryStorage()) {
   window.location.hash = hash;
-  const utils = render(<App api={createLocalStoreApi({ storage })} cartStorage={createCartStorage(storage)} />);
+  const utils = render(<App api={createLocalStoreApi({ storage })} cartStorage={createCartStorage(storage)} adminAccess={{ mode: 'demo' }} />);
   return { ...utils, storage, user: userEvent.setup() };
 }
 

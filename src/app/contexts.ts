@@ -2,6 +2,7 @@ import { createContext, useContext } from 'react';
 import type { CartLine } from '../domain/cart';
 import type { ProductFlags, ProductFormInput, StockMoveInput } from '../domain/operations';
 import type { Cart, Product, Sale, SaleItem, Settings, StoreData } from '../domain/types';
+import type { AdminAccess } from '../services/auth/adminAccess';
 import type { ApiResult } from '../services/storeApi';
 
 function useRequired<T>(ctx: React.Context<T | null>, name: string): T {
@@ -82,3 +83,8 @@ export interface UiContextValue {
 }
 export const UiContext = createContext<UiContextValue | null>(null);
 export const useUi = () => useRequired(UiContext, 'useUi');
+
+/* ---------------------------------------------------------------- Acesso ao painel */
+/** Modo de acesso ao painel (demonstração ou Firebase), escolhido em `services.ts`. */
+export const AdminAccessContext = createContext<AdminAccess | null>(null);
+export const useAdminAccess = () => useRequired(AdminAccessContext, 'useAdminAccess');

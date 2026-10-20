@@ -31,6 +31,7 @@ def test_admin_routes_match_the_planned_contract() -> None:
     assert (
         sorted(
             [
+                ("GET", "/api/v1/admin/me"),
                 ("GET", "/api/v1/admin/products"),
                 ("POST", "/api/v1/admin/products"),
                 ("PATCH", "/api/v1/admin/products/p1"),

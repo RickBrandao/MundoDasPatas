@@ -5,8 +5,10 @@ import { CartProvider } from '../features/cart/CartProvider';
 import { WhatsAppModal } from '../features/cart/WhatsAppModal';
 import { ProductDetailModal } from '../features/catalog/ProductDetailModal';
 import { StorePage } from '../features/catalog/StorePage';
+import type { AdminAccess } from '../services/auth/adminAccess';
 import type { CartStorage } from '../services/cartStorage';
 import type { StoreApi } from '../services/storeApi';
+import { AdminAccessContext } from './contexts';
 import { FeedbackProvider } from './FeedbackProvider';
 import { StoreProvider } from './StoreProvider';
 import { UiProvider } from './UiProvider';
@@ -55,12 +57,14 @@ export function AppProviders({ api, cartStorage, children }: { api: StoreApi; ca
   );
 }
 
-export function App({ api, cartStorage }: { api: StoreApi; cartStorage: CartStorage }) {
+export function App({ api, cartStorage, adminAccess }: { api: StoreApi; cartStorage: CartStorage; adminAccess: AdminAccess }) {
   return (
     <HashRouter>
-      <AppProviders api={api} cartStorage={cartStorage}>
-        <AppRoutes />
-      </AppProviders>
+      <AdminAccessContext.Provider value={adminAccess}>
+        <AppProviders api={api} cartStorage={cartStorage}>
+          <AppRoutes />
+        </AppProviders>
+      </AdminAccessContext.Provider>
     </HashRouter>
   );
 }

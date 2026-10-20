@@ -7,6 +7,7 @@ import type { Category, Product } from '../../domain/types';
 import { ProductDetailModal } from '../catalog/ProductDetailModal';
 import { CategoryFormModal } from '../categories/CategoryFormModal';
 import { StockMoveModal } from '../inventory/StockMoveModal';
+import { useOptionalAdminSession } from '../auth/adminSession';
 import { ProductFormModal } from '../products/ProductFormModal';
 import { SaleModal } from '../sales/SaleModal';
 import { ADMIN_TABS, AdminUiContext, type AdminUi } from './adminContext';
@@ -23,6 +24,9 @@ export function AdminLayout() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [modal, setModal] = useState<AdminModal>(null);
+  // Presente só no modo autenticado (Firebase); `null` na demonstração.
+  const auth = useOptionalAdminSession();
+  const signedInEmail = auth?.session.status === 'authorized' ? auth.session.user.email : null;
 
   const tab = ADMIN_TABS.find((t) => pathname.endsWith(`/${t.path}`)) ?? ADMIN_TABS[0];
   useEffect(() => {
@@ -74,9 +78,22 @@ export function AdminLayout() {
               <Icon name="storefront" size={22} />
               Ver loja
             </button>
-            <div className="admin-side__demo">
-              <strong>Modo demonstração.</strong> Acesso sem login. Na versão final, o painel será protegido por autenticação.
-            </div>
+            {auth ? (
+              <>
+                <div className="admin-side__demo">
+                  <strong>Ambiente de desenvolvimento.</strong> Acesso autenticado; os dados ainda são demonstrativos.
+                  {signedInEmail && <span className="admin-side__user">{signedInEmail}</span>}
+                </div>
+                <button type="button" className="btn btn--secondary admin-side__store" onClick={() => void auth.signOut()}>
+                  <Icon name="logout" size={22} />
+                  Sair
+                </button>
+              </>
+            ) : (
+              <div className="admin-side__demo">
+                <strong>Modo demonstração.</strong> Acesso sem login. Na versão final, o painel será protegido por autenticação.
+              </div>
+            )}
           </div>
         </aside>
 
@@ -85,11 +102,17 @@ export function AdminLayout() {
             <div className="admin-header__bar">
               <img className="admin-header__logo" src={asset('assets/logo.png')} alt="Mundo das Patas" />
               <h1 className="admin-header__title">{tab.label}</h1>
-              <span className="admin-header__demo">Demonstração · sem login</span>
+              <span className="admin-header__demo">{auth ? 'Desenvolvimento · dados locais' : 'Demonstração · sem login'}</span>
               <button type="button" className="btn btn--secondary admin-header__store" onClick={openStore} aria-label="Ver loja">
                 <Icon name="storefront" size={22} />
                 <span className="admin-header__store-label">Ver loja</span>
               </button>
+              {auth && (
+                <button type="button" className="btn btn--secondary admin-header__logout" onClick={() => void auth.signOut()} aria-label="Sair">
+                  <Icon name="logout" size={22} />
+                  <span className="admin-header__store-label">Sair</span>
+                </button>
+              )}
               <button type="button" className="btn btn--primary admin-header__sale" onClick={ui.openSale} style={{ padding: '0 16px' }}>
                 <Icon name="point_of_sale" />
                 Registrar venda
@@ -101,6 +124,11 @@ export function AdminLayout() {
           </header>
 
           <main className="admin-content">
+            {auth && (
+              <p className="notice notice--warn admin-dev-notice" role="note">
+                <strong>Ambiente de desenvolvimento</strong> — dados demonstrativos armazenados neste navegador.
+              </p>
+            )}
             {(storageFail || !persistent) && (
               <div role="alert" className="alert alert--danger" style={{ padding: '12px 14px', borderRadius: 12 }}>
                 {persistent
