@@ -1,4 +1,8 @@
-"""Logs em JSON de uma linha (legíveis nos logs da Vercel). Nunca registrar tokens ou credenciais."""
+"""Logs em JSON de uma linha (legíveis nos logs da Vercel). Nunca registrar tokens ou credenciais.
+
+Tracebacks nunca são gravados: a mensagem da exceção e os valores citados nas linhas de código
+podem conter dados sensíveis. Se um registro trouxer `exc_info`, só o tipo da exceção é incluído.
+"""
 
 import json
 import logging
@@ -13,8 +17,8 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
-        if record.exc_info:
-            entry["exception"] = self.formatException(record.exc_info)
+        if record.exc_info and record.exc_info[0] is not None:
+            entry["exceptionType"] = record.exc_info[0].__qualname__
         return json.dumps(entry, ensure_ascii=False)
 
 

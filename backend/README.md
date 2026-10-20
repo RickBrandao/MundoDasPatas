@@ -52,7 +52,7 @@ consultar a API pública. As rotas administrativas continuam protegidas: sem tok
 ### Testes e qualidade
 
 ```powershell
-python -m pytest              # 249 testes, sem rede e sem Firebase real
+python -m pytest              # 266 testes, sem rede e sem Firebase real
 ruff check .                  # lint
 ruff format --check .         # formatação
 ```
@@ -72,10 +72,10 @@ backend/
 │   ├── main.py                 create_app(): monta a aplicação; `app` para uvicorn/Vercel
 │   ├── core/
 │   │   ├── config.py           Settings (Pydantic Settings) + validação fail-closed por ambiente
-│   │   ├── errors.py           exceções da API e formato único de erro
+│   │   ├── errors.py           exceções da API, formato único de erro, 500 sem vazamento em logs
 │   │   ├── firebase.py         inicialização preguiçosa e única do Firebase Admin SDK
 │   │   ├── security.py         verificação de ID Token e autorização administrativa
-│   │   └── logging.py          logs JSON de uma linha
+│   │   └── logging.py          logs JSON de uma linha (sem tracebacks)
 │   ├── api/
 │   │   ├── dependencies.py     injeção: settings, autenticação, repositórios, serviços
 │   │   └── v1/
@@ -170,7 +170,7 @@ ou vazio); data URLs, usadas na demo, são recusadas. O upload irá para o Cloud
 | 405 | `method_not_allowed` | método não suportado |
 | 409 | `conflict`, `insufficient_stock`, `idempotency_key_reused`, `idempotency_replay_unavailable` | conflito com o estado atual (ver seção 6) |
 | 422 | `validation_error` | campos inválidos (`fieldErrors` no mesmo formato do frontend) |
-| 500 | `internal_error` | erro inesperado (detalhes só no log do servidor) |
+| 500 | `internal_error` | erro inesperado; cabeçalho `X-Error-Id` correlaciona com o log (ver “Erros inesperados e logs”) |
 | 501 | `not_implemented` | persistência real ainda não disponível |
 | 503 | `service_unavailable`, `auth_unavailable` | autenticação não configurada, credenciais inválidas ou Firebase indisponível |
 
@@ -288,9 +288,52 @@ um petshop com um ou poucos usuários:
   `*firebase-adminsdk*.json`).
 - `FIREBASE_SERVICE_ACCOUNT_JSON` é `SecretStr`: não aparece em `repr` nem em logs.
 - Logs não registram tokens: falhas de verificação registram só o tipo do erro.
-- Erros 500 devolvem mensagem genérica; o detalhe fica apenas no log.
+- Erros 500 devolvem mensagem genérica e **não registram a mensagem da exceção** (ver abaixo).
 - Respostas administrativas com `Cache-Control: no-store`; todas com `X-Content-Type-Options: nosniff`.
 - CORS explícito por ambiente, sem cookies (`allow_credentials=False`). CORS não substitui autenticação.
+
+### Erros inesperados e logs
+
+Mensagens de exceção e tracebacks podem conter tokens, senhas, strings de conexão ou dados pessoais.
+Por isso uma exceção não tratada **nunca** é registrada com `str(exc)`, `repr(exc)`, `exc.args` ou
+traceback. O log (`app.errors`, nível `ERROR`) traz apenas metadados controlados:
+
+```json
+{"ts": "…", "level": "ERROR", "logger": "app.errors",
+ "message": "Erro inesperado: id=3f9c… tipo=RuntimeError causas=KeyError origem=app.services.inventory:register_sale:120 metodo=POST rota=/api/v1/admin/sales"}
+```
+
+| Campo | Conteúdo |
+|---|---|
+| `id` | identificador da ocorrência; o mesmo valor vai na resposta, no cabeçalho `X-Error-Id` |
+| `tipo` / `causas` | classes da exceção e da cadeia `__cause__`/`__context__` (só os nomes) |
+| `origem` | módulo, função e linha onde a exceção foi lançada (sem valores) |
+| `metodo` / `rota` | método HTTP e **modelo** da rota (`/products/{product_id}`); nunca o caminho real, a query string, cabeçalhos, cookies ou corpo |
+
+Como o tratamento funciona (`core/errors.py`):
+
+- O `ServerErrorMiddleware` do Starlette responde 500 e **relança** a exceção ao servidor ASGI; o
+  Uvicorn então imprime `Exception in ASGI application` com o traceback completo. Suprimir apenas o
+  log da aplicação não resolveria.
+- `UnexpectedErrorGuard` (middleware ASGI) fica em duas posições: logo acima das rotas, onde responde
+  500 sem relançar (a resposta ainda recebe CORS e `X-Content-Type-Options`/`Cache-Control`), e por
+  fora de toda a pilha, onde contém falhas dos próprios middlewares e descarta a exceção relançada
+  pelo `ServerErrorMiddleware`. Nenhuma exceção chega ao servidor; cada ocorrência gera um único log.
+- O `JsonFormatter` não grava tracebacks: um `logger.exception(...)` futuro registra só `exceptionType`.
+- Erros conhecidos (400, 401, 403, 404, 409, 422, 501, 503) continuam com seus handlers e não geram
+  esse log.
+- Os testes (`tests/test_error_logging.py`) usam marcadores fictícios em mensagens, causas
+  encadeadas, cabeçalhos, caminho, query e corpo, inclusive com um Uvicorn real em subprocesso.
+
+Limitações fora do controle da aplicação:
+
+- **Log de acesso do Uvicorn** registra a linha da requisição com caminho e **query string**
+  (`"GET /rota?x=… HTTP/1.1" 500`). A API não recebe segredos na URL (o token vai no cabeçalho
+  `Authorization`), mas em ambientes compartilhados prefira `uvicorn … --no-access-log`.
+- **Plataforma de hospedagem** (Vercel) mantém seus próprios logs de requisição (URL, status, duração);
+  revise a retenção e o acesso a eles na homologação.
+- Exceções lançadas **depois** de a resposta começar (streaming) não podem virar 500: o log seguro é
+  emitido e a conexão é encerrada. A API atual não usa streaming.
 
 ---
 
@@ -538,5 +581,6 @@ o firebase-admin traz `google-cloud-firestore` e `grpcio`.
   integração com o emulador (transações concorrentes, reexecução, unicidade, idempotência).
 - **Imagens:** upload para o Cloud Storage com URLs assinadas ou regras de Storage.
 - **Integração React:** itens da seção 10.
-- **Homologação:** deploy na Vercel (staging), domínio, CORS de homologação, monitoramento de logs.
+- **Homologação:** deploy na Vercel (staging), domínio, CORS de homologação, monitoramento de logs
+  (incluindo os logs de requisição da plataforma, que a aplicação não controla).
 - Paginação por cursor em vendas/movimentações quando o volume crescer (hoje `limit` até 500).

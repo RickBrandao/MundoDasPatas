@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.errors import Conflict, NotImplementedYet
@@ -11,7 +12,7 @@ def _client_with(route_handler: object) -> TestClient:
     return TestClient(app, raise_server_exceptions=False)
 
 
-def test_unexpected_error_returns_generic_500_without_internal_details() -> None:
+def test_unexpected_error_returns_generic_500_without_internal_details(capsys: pytest.CaptureFixture[str]) -> None:
     def boom() -> None:
         raise RuntimeError("senha=123 conexão interna falhou")
 
@@ -19,6 +20,7 @@ def test_unexpected_error_returns_generic_500_without_internal_details() -> None
     assert r.status_code == 500
     assert r.json() == {"error": {"code": "internal_error", "message": "Erro interno. Tente novamente em instantes."}}
     assert "senha" not in r.text
+    assert "senha=123" not in capsys.readouterr().err  # nem no log (ver test_error_logging.py)
 
 
 def test_api_error_format() -> None:
