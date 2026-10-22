@@ -4,7 +4,7 @@
 interface ImportMetaEnv {
   /** `demo` (padrão) ou `firebase`. Ver `src/services/auth/adminAccess.ts`. */
   readonly VITE_ADMIN_AUTH_MODE?: string;
-  /** URL do FastAPI, sem barra final (ex.: http://localhost:8000). Só no modo `firebase`. */
+  /** URL do FastAPI, sem barra final (ex.: http://127.0.0.1:8000). Só no modo `firebase`. */
   readonly VITE_API_BASE_URL?: string;
   readonly VITE_FIREBASE_API_KEY?: string;
   readonly VITE_FIREBASE_AUTH_DOMAIN?: string;

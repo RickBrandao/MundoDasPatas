@@ -61,7 +61,7 @@ Copie `.env.example` e preencha com a configuração **pública** do app Web reg
 
 ```
 VITE_ADMIN_AUTH_MODE=firebase
-VITE_API_BASE_URL=http://localhost:8000
+VITE_API_BASE_URL=http://127.0.0.1:8000
 VITE_FIREBASE_API_KEY=...
 VITE_FIREBASE_AUTH_DOMAIN=...
 VITE_FIREBASE_PROJECT_ID=...
@@ -100,6 +100,17 @@ gcloud auth application-default set-quota-project <ID do projeto>
 
 A conta Google usada precisa ter acesso ao projeto Firebase (ex.: proprietário).
 
+> **Atenção:** se `GOOGLE_APPLICATION_CREDENTIALS` estiver definida (inclusive como variável
+> **de usuário do Windows**, herdada por todo terminal novo), ela tem prioridade sobre o login do
+> `gcloud`. Apontando para a conta de serviço de outro projeto, a verificação com
+> `check_revoked=True` falha com `InsufficientPermissionError` e `/admin/me` responde `503`.
+> Para usar o ADC do `gcloud` só neste backend, sem mexer em outros projetos:
+>
+> ```powershell
+> Remove-Item Env:GOOGLE_APPLICATION_CREDENTIALS -ErrorAction SilentlyContinue  # só nesta sessão
+> uvicorn app.main:app --reload --port 8000
+> ```
+
 **Alternativa — conta de serviço:** gere a chave no Console (Configurações do projeto →
 Contas de serviço), salve o JSON **fora do repositório** e aponte para ele só na sessão:
 
@@ -122,7 +133,7 @@ se a chave de API tem restrições de referenciador HTTP no Google Cloud Console
 ## 4. Smoke test manual (com credenciais reais)
 
 1. `cd backend; .\.venv\Scripts\Activate.ps1; uvicorn app.main:app --reload --port 8000`
-2. Confirme <http://localhost:8000/health> → `auth.status = "configured"`.
+2. Confirme <http://127.0.0.1:8000/health> → `auth.status = "configured"`.
 3. Em outro terminal, na raiz: `npm run dev` (com `VITE_ADMIN_AUTH_MODE=firebase` no `.env.local`).
 4. Abra <http://localhost:5173/MundoDasPatas/#/admin> → deve ir para a tela **Entrar**.
 5. Entre com o usuário administrativo existente.
@@ -133,4 +144,6 @@ se a chave de API tem restrições de referenciador HTTP no Google Cloud Console
 
 Diagnóstico: `503` = credenciais do servidor/`FIREBASE_PROJECT_ID`; `403` = UID fora de
 `ADMIN_ALLOWED_UIDS`; `401` = token de outro projeto (IDs diferentes entre frontend e backend);
-erro de CORS no console = `CORS_ORIGINS`.
+erro de CORS no console = `CORS_ORIGINS`. "Não foi possível conectar ao servidor" com o backend
+no ar = `VITE_API_BASE_URL` com `localhost` resolvendo para `::1`, onde outro serviço (WSL/Docker)
+ocupa a porta — confira com `Get-NetTCPConnection -State Listen -LocalPort 8000` e use `127.0.0.1`.

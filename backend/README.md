@@ -42,9 +42,9 @@ Copy-Item .env.example .env           # opcional; sem .env valem os padrões de 
 uvicorn app.main:app --reload --port 8000
 ```
 
-- API: <http://localhost:8000>
-- Health check: <http://localhost:8000/health>
-- Swagger (OpenAPI): <http://localhost:8000/docs> (desativado quando `APP_ENV=production`)
+- API: <http://127.0.0.1:8000>
+- Health check: <http://127.0.0.1:8000/health>
+- Swagger (OpenAPI): <http://127.0.0.1:8000/docs> (desativado quando `APP_ENV=production`)
 
 Não é preciso nenhuma credencial do Firebase para iniciar a aplicação, ver o health check e
 consultar a API pública. As rotas administrativas continuam protegidas: sem token respondem
