@@ -21,7 +21,7 @@ from app.repositories.base import InventoryTransaction, Repositories
 from app.schemas.catalog import ProductAdminOut
 from app.schemas.common import ApiModel
 from app.schemas.inventory import SaleCreate, SaleOut, StockMovementCreate, StockMovementOut, StockMovementResult
-from app.services.common import Clock, IdFactory, new_id, request_hash, utc_now
+from app.services.common import Clock, IdFactory, derived_ids, new_id, request_hash, utc_now
 
 OP_SALE = "sale.create"
 OP_SALE_CANCEL = "sale.cancel"
@@ -98,6 +98,7 @@ class InventoryService:
         items = [SaleItem(product_id=i.product_id, qty=i.qty) for i in data.items]
         now = self._clock()
         sale_id = self._ids()
+        movement_seed = self._ids()
 
         def run(tx: InventoryTransaction) -> Outcome[SaleOut]:
             previous = _find_replay(tx, OP_SALE, actor_uid, key, fingerprint, now)
@@ -106,7 +107,7 @@ class InventoryService:
             # Lê todos os produtos envolvidos na mesma transação em que o estoque será baixado:
             # duas vendas simultâneas do mesmo produto não conseguem vender a mesma unidade.
             products = tx.get_products({i.product_id for i in items})
-            change = plan_sale(products, items, sale_id=sale_id, actor_uid=actor_uid, now=now, new_id=self._ids)
+            change = plan_sale(products, items, sale_id=sale_id, actor_uid=actor_uid, now=now, new_id=derived_ids(movement_seed))
             assert change.sale is not None
             result = SaleOut.model_validate(change.sale)
             tx.put_sale(change.sale)
@@ -121,6 +122,7 @@ class InventoryService:
         # A venda faz parte do corpo lógico: a mesma chave não pode cancelar outra venda.
         fingerprint = request_hash({"saleId": sale_id})
         now = self._clock()
+        movement_seed = self._ids()
 
         def run(tx: InventoryTransaction) -> Outcome[SaleOut]:
             previous = _find_replay(tx, OP_SALE_CANCEL, actor_uid, key, fingerprint, now)
@@ -131,7 +133,7 @@ class InventoryService:
                 raise NotFound("Venda não encontrada.")
             products = tx.get_products({i.product_id for i in sale.items})
             # O status é verificado na transação: o estorno acontece no máximo uma vez.
-            change = plan_cancellation(sale, products, actor_uid=actor_uid, now=now, new_id=self._ids)
+            change = plan_cancellation(sale, products, actor_uid=actor_uid, now=now, new_id=derived_ids(movement_seed))
             assert change.sale is not None
             result = SaleOut.model_validate(change.sale)
             tx.put_sale(change.sale)
@@ -143,8 +145,11 @@ class InventoryService:
 
     # ------------------------------------------------------------------ dashboard
 
-    def sales_since(self, days: int) -> list[Sale]:
-        return self._repos.sales.list(limit=10_000, since=self._clock() - timedelta(days=days))
+    def sales_windows(self, *days: int) -> dict[int, list[Sale]]:
+        """Vendas dos últimos N dias para cada janela, com uma única consulta (a da maior janela)."""
+        now = self._clock()
+        widest = self._repos.sales.list(limit=10_000, since=now - timedelta(days=max(days)))
+        return {d: [s for s in widest if s.created_at >= now - timedelta(days=d)] for d in days}
 
 
 def _find_replay(

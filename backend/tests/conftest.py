@@ -18,6 +18,7 @@ from app.core.security import InvalidToken, VerifiedToken  # noqa: E402
 from app.domain.models import Category, Product, StoreSettings  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.repositories.base import Repositories  # noqa: E402
+from app.repositories.firestore import create_firestore_repositories  # noqa: E402
 from app.repositories.memory import MemoryState, create_memory_repositories  # noqa: E402
 
 ADMIN_UID = "admin-uid-1"
@@ -30,6 +31,9 @@ _ENV_VARS = (
     "FIREBASE_SERVICE_ACCOUNT_JSON",
     "FIRESTORE_DATABASE_ID",
     "FIREBASE_AUTH_EMULATOR_HOST",
+    # Os testes unitários nunca alcançam um Firestore (real ou emulador): ver tests_emulator/.
+    "FIRESTORE_EMULATOR_HOST",
+    "GOOGLE_APPLICATION_CREDENTIALS",
     "ADMIN_ALLOWED_UIDS",
     "CORS_ORIGINS",
     "LOG_LEVEL",
@@ -77,6 +81,26 @@ def build_client(settings: Settings | None = None, repos: Repositories | None = 
     if verifier is not None:
         app.dependency_overrides[get_token_verifier] = lambda: verifier
     return TestClient(app, raise_server_exceptions=False)
+
+
+class UnreachableFirestore:
+    """Cliente falso do Firestore em que toda chamada falha como uma rede indisponível."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        from google.api_core import exceptions as gexc
+
+        self.error = error or gexc.ServiceUnavailable("connect failed: 10.0.0.1 token=SEGREDO")
+
+    def __getattr__(self, name: str) -> Any:
+        def fail(*_: Any, **__: Any) -> Any:
+            raise self.error
+
+        return fail
+
+
+def unreachable_firestore_repos(settings: Settings, error: Exception | None = None) -> Repositories:
+    client = UnreachableFirestore(error)
+    return create_firestore_repositories(settings, client=lambda: client)  # type: ignore[arg-type,return-value]
 
 
 @pytest.fixture

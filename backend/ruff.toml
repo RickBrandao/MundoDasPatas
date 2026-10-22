@@ -9,3 +9,4 @@ ignore = ["S101", "B008"]
 
 [lint.per-file-ignores]
 "tests/*" = ["S105", "S106", "E501"]
+"tests_emulator/*" = ["S105", "S106", "E501"]

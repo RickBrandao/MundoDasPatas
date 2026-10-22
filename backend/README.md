@@ -4,7 +4,9 @@ Fundação da API real do Mundo das Patas (TASK 04). O frontend React na raiz do
 **continua usando os dados demonstrativos** (`localStoreApi`) e o GitHub Pages não foi alterado.
 
 > **Situação:** arquitetura, contratos, segurança e regras de negócio prontos e testados.
-> **Ainda não há banco real** (Firestore). O login do painel (TASK 05B) usa `GET /api/v1/admin/me`
+> **Persistência no Cloud Firestore implementada** (TASK 06B) e validada no Firestore Emulator —
+> guia completo em [`docs/firestore.md`](../docs/firestore.md). O banco real ainda não recebeu
+> escritas (smoke test pendente de aprovação). O login do painel (TASK 05B) usa `GET /api/v1/admin/me`
 > — ver [`docs/autenticacao.md`](../docs/autenticacao.md).
 > Os repositórios em memória servem apenas para testes e desenvolvimento local.
 
@@ -53,9 +55,19 @@ consultar a API pública. As rotas administrativas continuam protegidas: sem tok
 ### Testes e qualidade
 
 ```powershell
-python -m pytest              # 289 testes, sem rede e sem Firebase real
+python -m pytest              # 315 testes unitários, sem rede, sem Firebase e sem emulador
 ruff check .                  # lint
 ruff format --check .         # formatação
+```
+
+Testes de integração do Firestore (separados; exigem o emulador ativo — ver
+[`docs/firestore.md` §4](../docs/firestore.md#4-firestore-emulator-no-windows)):
+
+```powershell
+# outro terminal, na raiz do repositório:
+#   firebase emulators:start --only firestore --project demo-mundo-das-patas-test
+$env:FIRESTORE_EMULATOR_HOST = "127.0.0.1:8181"
+python -m pytest tests_emulator   # 32 testes; sem o emulador, a sessão aborta sem executar nada
 ```
 
 `requirements.txt` contém só o necessário em execução (FastAPI, Pydantic, Pydantic Settings,
@@ -357,31 +369,31 @@ Limitações fora do controle da aplicação:
 | `SettingsRepository` | `get`, `save` |
 | `InventoryRepository` | `run_in_transaction(fn)` com leituras e escritas de produtos, vendas, movimentações e chaves de idempotência |
 
-### Firestore (próxima etapa)
+### Firestore (`repositories/firestore.py`)
+
+Coleções, serialização, índices, emulador, configuração real e limites do plano Spark:
+[`docs/firestore.md`](../docs/firestore.md). Resumo:
 
 | Coleção | Documento | Observação |
 | --- | --- | --- |
-| `products` | `{id}` | campos snake_case ou camelCase (decidir na implementação), timestamps nativos |
-| `categories` | `{id}` | |
-| `category_name_claims` | `sha256(normalize_text(nome))` | `{category_id}`; reserva do nome (ver "Unicidade de categorias") |
-| `sales` | `{id}` | índice em `created_at` |
-| `stock_movements` | `{id}` | índices em `created_at` e (`product_id`, `created_at`) |
-| `settings` | `store` | documento único |
-| `idempotency_keys` | `sha256(operation, actor_uid, key)` | snapshot da resposta; política de TTL do Firestore no campo `expires_at` |
+| `products`, `categories`, `sales`, `stock_movements` | `{id}` | snake_case, Timestamps UTC, centavos inteiros |
+| `category_name_claims` | `sha256(normalize_text(nome))` | reserva do nome (unicidade) |
+| `settings` | `store` | inexistente = padrões calculados, nunca gravados implicitamente |
+| `idempotency_keys` | `sha256([operation, actor_uid, key])` | snapshot da resposta; expiração lógica (sem TTL no Spark) |
 
 - `FIRESTORE_DATABASE_ID` permite usar um banco nomeado (ex.: separar homologação de produção).
-- Dados de demonstração **não** devem ser inseridos em produção. Uma importação inicial, se
-  desejada, será um script explícito e separado.
+- Dados de demonstração **não** são inseridos. Uma importação inicial, se desejada, será um
+  script explícito e separado.
 
 ### Transações
 
-`run_in_transaction` mapeia para `@firestore.transactional`:
+`run_in_transaction` usa `@firestore.transactional`, com repetição adicional em disputa (ver `docs/firestore.md`):
 
 - **Venda:** lê todos os produtos da venda e a chave de idempotência → valida tudo → grava a venda,
   o novo estoque de cada produto, as movimentações e a chave. Tudo ou nada.
 - **Duas vendas simultâneas do último item:** o Firestore detecta que o documento do produto mudou e
   repete a transação; na repetição o estoque lido é 0 e a segunda venda recebe `409 insufficient_stock`.
-  (Coberto por teste concorrente com 8 threads sobre o repositório em memória.)
+  (Coberto por testes concorrentes em memória e no Firestore Emulator, cada thread com seu cliente.)
 - **Cancelamento:** lê a chave de idempotência, a venda e os produtos → se a chave já existe, devolve
   o snapshot; se a venda já está `cancelada`, responde `409`; senão grava venda, estoque, estornos e
   chave. Dois cancelamentos simultâneos não estornam duas vezes (testado com 8 threads).
@@ -440,8 +452,9 @@ no momento da operação.
   continua seguro (a venda já está `cancelada` → `409`), mas sem o snapshot.
 - Portanto a proteção contra repetição vale **por 24 horas**, não indefinidamente. Retries
   automáticos e duplos cliques acontecem em segundos; 24 h cobrem também uma aba reaberta no dia seguinte.
-- Não há limpeza agendada: em memória os registros vivem até o processo reiniciar; no Firestore, a
-  política de TTL no campo `expires_at` fará a remoção.
+- Não há limpeza agendada: em memória os registros vivem até o processo reiniciar; no Firestore os
+  documentos expirados permanecem (inertes) — o TTL exige faturamento e não foi habilitado no plano
+  Spark. Crescimento e manutenção futura: `docs/firestore.md` §6.
 
 ### Unicidade de categorias
 
@@ -454,27 +467,27 @@ forma atômica — não por consulta seguida de inserção no serviço:
 - Manter o próprio nome (inclusive mudando só maiúsculas/acentos) é permitido.
 - Depois de uma renomeação, o nome antigo fica livre para outra categoria.
 - **Memória:** verificação e gravação na mesma seção crítica (o lock já usado pelos repositórios).
-- **Firestore:** índices não impõem unicidade. `save` será uma transação que lê a categoria atual e
+- **Firestore:** índices não impõem unicidade. `save` é uma transação que lê a categoria atual e
   `category_name_claims/{sha256(nome normalizado)}`; se a reserva pertence a outro ID → conflito;
   senão grava a categoria, cria a reserva nova e, numa renomeação, apaga a reserva antiga — tudo
   na mesma transação. Duas transações concorrentes sobre a mesma reserva: o Firestore repete uma
   delas, que então encontra a reserva ocupada. O hash evita caracteres inválidos em IDs de documento.
 
-### Considerações para o repositório Firestore
+### Validação no Firestore Emulator
 
-Os testes em memória validam a lógica, **não** o comportamento transacional do Firestore. Na
-implementação real será preciso confirmar, com o emulador:
+Os testes em memória validam a lógica; `tests_emulator/` valida o comportamento real do Firestore:
+persistência após recriar os repositórios, serialização de Timestamps, consultas e ordenação,
+rollback sem escrita parcial, venda multi-item, estoque insuficiente, estorno único, replays após
+alterações posteriores, expiração, perda da resposta após o commit, e concorrência (último item,
+mesma chave, venda × ajuste, cancelamentos, edição × estoque, nomes de categoria). Invariante
+verificado: `estoque = inicial + Σ movimentações`, nunca negativo.
 
-- Ordem leituras → escritas: as funções de transação já leem chave, venda e produtos antes de
-  qualquer escrita, como o Firestore exige.
-- Reexecução automática: `now` e os IDs da venda/movimentação são fixados antes da transação; o
-  snapshot é derivado do que foi lido; a função não tem efeitos externos. IDs das movimentações
-  de venda/estorno são gerados dentro da função (aceitável: só a tentativa confirmada grava).
-- `put_idempotency` deve usar `set` no ID determinístico `sha256(operation, actor_uid, key)`, para
-  sobrescrever um registro expirado.
+- Ordem leituras → escritas: imposta pela transação (`ReadAfterWrite`).
+- Reexecução: `now`, IDs e a semente dos IDs das movimentações são fixados antes da transação
+  (`derived_ids`); o snapshot é derivado do que foi lido; nenhum efeito externo.
+- `put_idempotency` usa `set` no ID determinístico (sobrescreve um registro expirado); movimentações
+  usam `create` (imutáveis).
 - Limite de 1 MiB por documento: o maior snapshot (venda com 100 itens) fica muito abaixo.
-- Configurar a política de TTL do campo `expires_at` em `idempotency_keys` (o TTL é feito pelo
-  Firestore, não pelo código).
 - A edição de categoria lê a categoria atual fora da transação (comportamento anterior, last-write-wins
   para `active`/`icon`); a unicidade do nome, porém, é decidida dentro da transação.
 
@@ -499,6 +512,7 @@ Lidas do ambiente e, em desenvolvimento, de `backend/.env` (modelo em `.env.exam
 | `FIRESTORE_DATABASE_ID` | `(default)` | banco Firestore |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | vazio | conteúdo JSON da conta de serviço (segredo); sem ele, Application Default Credentials |
 | `FIREBASE_AUTH_EMULATOR_HOST` | vazio | apenas emulador local; proibido em staging/produção |
+| `FIRESTORE_EMULATOR_HOST` | vazio | `host:porta` do Firestore Emulator, **no ambiente do processo** (não basta o `.env`); proibido em staging/produção |
 | `ADMIN_ALLOWED_UIDS` | vazio | UIDs autorizados no painel |
 
 ---
@@ -513,8 +527,9 @@ Lidas do ambiente e, em desenvolvimento, de `backend/.env` (modelo em `.env.exam
    - local: `$env:GOOGLE_APPLICATION_CREDENTIALS = "C:\caminho\fora\do\repo\chave.json"`;
    - hospedagem: conteúdo em `FIREBASE_SERVICE_ACCOUNT_JSON` como variável secreta.
 5. Definir `FIREBASE_PROJECT_ID`. A verificação de tokens passa a funcionar sem mudança de código.
-6. Firestore (etapa seguinte): criar o banco, regras de segurança negando acesso direto do
-   navegador (todo acesso passa pela API), índices e política de TTL de `idempotency_keys`.
+6. Firestore: banco `(default)` já criado. Regras deny-all (`firestore.rules`) e índices
+   (`firestore.indexes.json`) estão prontos, **não publicados** — publicação manual e verificação de
+   conectividade em [`docs/firestore.md` §5](../docs/firestore.md#5-firestore-real-mundo-das-patas---dev).
 
 ---
 
@@ -585,9 +600,8 @@ o firebase-admin traz `google-cloud-firestore` e `grpcio`.
 - **Firebase:** credenciais do servidor (ADC ou conta de serviço) e `backend/.env` locais — ver
   [`docs/autenticacao.md`](../docs/autenticacao.md).
 - **Autenticação real:** login implementado (TASK 05B); falta o smoke test ponta a ponta com o usuário real.
-- **Firestore:** implementar `repositories/firestore.py` seguindo os Protocols, regras de segurança,
-  índices, TTL de idempotência (`expires_at`), reservas `category_name_claims`; testes de
-  integração com o emulador (transações concorrentes, reexecução, unicidade, idempotência).
+- **Firestore real:** publicar regras/índices e executar o smoke test (com aprovação do proprietário);
+  TTL de `idempotency_keys` quando houver faturamento — ver [`docs/firestore.md`](../docs/firestore.md).
 - **Imagens:** upload para o Cloud Storage com URLs assinadas ou regras de Storage.
 - **Integração React:** itens da seção 10.
 - **Homologação:** deploy na Vercel (staging), domínio, CORS de homologação, monitoramento de logs

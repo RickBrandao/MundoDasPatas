@@ -2,7 +2,8 @@
 
 `create_app()` monta a aplicação a partir da configuração (testes passam a sua própria).
 `app` é a instância usada por `uvicorn app.main:app` e, futuramente, pela Vercel.
-Nenhuma conexão externa é aberta aqui: Firebase só é inicializado na primeira verificação de token.
+Nenhuma conexão externa é aberta aqui: Firebase só é inicializado na primeira verificação de token
+e o cliente do Firestore, na primeira operação de dados.
 """
 
 from collections.abc import Awaitable, Callable
@@ -20,11 +21,13 @@ from app.repositories.memory import create_memory_repositories
 from app.schemas.store import DependencyStatus, HealthOut
 
 
-def build_repositories(settings: Settings) -> Repositories | None:
+def build_repositories(settings: Settings) -> Repositories:
     if settings.data_backend is DataBackend.MEMORY:
         return create_memory_repositories()
-    # Firestore: implementação prevista para a próxima etapa. Até lá, rotas de dados respondem 501.
-    return None
+    # Sem fallback para memória: configuração incompleta ou banco indisponível respondem 503.
+    from app.repositories.firestore import create_firestore_repositories
+
+    return create_firestore_repositories(settings)
 
 
 def create_app(settings: Settings | None = None, repositories: Repositories | None = None) -> FastAPI:
@@ -81,8 +84,14 @@ def _dependencies(app: FastAPI) -> dict[str, DependencyStatus]:
     )
     if settings.data_backend is DataBackend.MEMORY:
         database = DependencyStatus(status="ephemeral", detail="Repositórios em memória (somente desenvolvimento/testes).")
+    elif not settings.firebase_configured:
+        database = DependencyStatus(
+            status="not_configured", detail="Cloud Firestore sem FIREBASE_PROJECT_ID: rotas de dados respondem 503."
+        )
+    elif settings.firestore_emulator_host:
+        database = DependencyStatus(status="emulator", detail="Firestore Emulator local (somente desenvolvimento).")
     else:
-        database = DependencyStatus(status="not_implemented", detail="Integração com Cloud Firestore pendente.")
+        database = DependencyStatus(status="configured", detail="Cloud Firestore configurado (não verificado por este endpoint).")
     return {"auth": auth, "database": database}
 
 

@@ -57,8 +57,8 @@ class DashboardService:
             out=counts[StockStatus.OUT],
         )
         low_stock = sorted((p for p in products if stock_status(p) is not StockStatus.OK), key=lambda p: (p.stock, p.name))
-        last_30 = self._inventory.sales_since(30)
-        last_7 = self._inventory.sales_since(7)
+        windows = self._inventory.sales_windows(7, 30)
+        last_7, last_30 = windows[7], windows[30]
         return DashboardOut(
             catalog=catalog,
             sales_last_7_days=_sales_summary(last_7),

@@ -85,7 +85,7 @@ class DashboardOut(ApiModel):
 
 
 class DependencyStatus(ApiModel):
-    status: Literal["configured", "not_configured", "ephemeral", "not_implemented"]
+    status: Literal["configured", "not_configured", "ephemeral", "emulator"]
     detail: str
 
 

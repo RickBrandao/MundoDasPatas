@@ -26,12 +26,22 @@ def test_health_reports_process_and_dependencies_without_claiming_firestore() ->
     assert body["dependencies"]["database"]["status"] == "ephemeral"
 
 
-def test_health_with_firestore_backend_reports_not_implemented() -> None:
+def test_health_with_firestore_backend_reports_configuration_without_connecting() -> None:
+    # Sem repositórios injetados: create_app monta os repositórios reais, mas não abre conexão.
     with build_client(make_settings(data_backend="firestore", firebase_project_id="demo")) as c:
         body = c.get("/health").json()
-    assert body["dependencies"]["database"]["status"] == "not_implemented"
     # "configured" descreve a configuração; o health check não afirma conexão verificada.
+    assert body["dependencies"]["database"]["status"] == "configured"
     assert body["dependencies"]["auth"]["status"] == "configured"
+    assert "demo" not in str(body)  # não expõe o ID do projeto
+
+
+def test_health_firestore_without_project_and_with_emulator() -> None:
+    with build_client(make_settings(data_backend="firestore")) as c:
+        assert c.get("/health").json()["dependencies"]["database"]["status"] == "not_configured"
+    settings = make_settings(data_backend="firestore", firebase_project_id="demo-x", firestore_emulator_host="127.0.0.1:8181")
+    with build_client(settings) as c:
+        assert c.get("/health").json()["dependencies"]["database"]["status"] == "emulator"
 
 
 def test_docs_available_outside_production() -> None:

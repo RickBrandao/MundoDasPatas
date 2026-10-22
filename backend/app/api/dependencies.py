@@ -10,7 +10,6 @@ from fastapi import Depends, Header, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import Settings
-from app.core.errors import NotImplementedYet
 from app.core.security import AdminPrincipal, FirebaseTokenVerifier, TokenVerifier, authenticate_admin
 from app.repositories.base import Repositories
 from app.services.catalog import CategoryService, ProductService, PublicCatalogService
@@ -57,10 +56,7 @@ IdempotencyKey = Annotated[
 
 
 def get_repositories(request: Request) -> Repositories:
-    repos: Repositories | None = request.app.state.repositories
-    if repos is None:
-        raise NotImplementedYet("Persistência de dados ainda não disponível nesta versão da API.")
-    return repos
+    return request.app.state.repositories
 
 
 ReposDep = Annotated[Repositories, Depends(get_repositories)]

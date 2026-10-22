@@ -10,7 +10,7 @@ from app.core.errors import ServiceUnavailable
 from app.core.firebase import FirebaseNotConfigured, get_firebase_app
 from app.core.security import FirebaseTokenVerifier, InvalidToken
 from app.main import create_app
-from tests.conftest import ADMIN, USER, build_client, default_verifier, make_settings
+from tests.conftest import ADMIN, USER, build_client, default_verifier, make_settings, unreachable_firestore_repos
 
 
 def _admin_routes() -> list[tuple[str, str]]:
@@ -119,14 +119,15 @@ def test_local_environment_has_no_auth_bypass() -> None:
 
 
 def test_auth_is_checked_before_data_availability() -> None:
-    # Com Firestore ainda não implementado, rotas de dados respondem 501 — mas só depois da autenticação.
+    # Com o Firestore inacessível, rotas de dados respondem 503 — mas só depois da autenticação.
     settings = make_settings(data_backend="firestore", firebase_project_id="demo", admin_allowed_uids="admin-uid-1")
-    with build_client(settings, verifier=default_verifier()) as c:
+    with build_client(settings, unreachable_firestore_repos(settings), verifier=default_verifier()) as c:
         assert c.get("/api/v1/admin/products").status_code == 401
         assert c.get("/api/v1/admin/products", headers=USER).status_code == 403
         r = c.get("/api/v1/admin/products", headers=ADMIN)
-        assert r.status_code == 501
-        assert c.get("/api/v1/public/catalog").status_code == 501
+        assert r.status_code == 503
+        assert r.json()["error"]["code"] == "database_unavailable"
+        assert c.get("/api/v1/public/catalog").status_code == 503
 
 
 def test_default_verifier_dependency_is_none_without_firebase() -> None:

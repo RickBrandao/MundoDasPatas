@@ -18,6 +18,22 @@ def new_id() -> str:
     return uuid.uuid4().hex
 
 
+def derived_ids(seed: str) -> IdFactory:
+    """IDs derivados de uma semente fixada fora da transação.
+
+    Criada dentro da função da transação, recomeça a cada reexecução: a tentativa confirmada usa
+    sempre os mesmos IDs (`seed`, posição), independentemente de quantas vezes o Firestore repetiu.
+    """
+    counter = 0
+
+    def next_id() -> str:
+        nonlocal counter
+        counter += 1
+        return hashlib.sha256(f"{seed}:{counter}".encode()).hexdigest()[:32]
+
+    return next_id
+
+
 def request_hash(payload: Any) -> str:
     """Impressão digital do corpo da requisição, para detectar reuso da chave de idempotência."""
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)

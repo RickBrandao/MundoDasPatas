@@ -11,7 +11,16 @@ from app.core import security
 from app.core.errors import ServiceUnavailable
 from app.core.security import AdminPrincipal, VerifiedToken
 from app.main import create_app
-from tests.conftest import ADMIN, ADMIN_UID, USER, FakeVerifier, build_client, default_verifier, make_settings
+from tests.conftest import (
+    ADMIN,
+    ADMIN_UID,
+    USER,
+    FakeVerifier,
+    build_client,
+    default_verifier,
+    make_settings,
+    unreachable_firestore_repos,
+)
 
 ME = "/api/v1/admin/me"
 
@@ -139,10 +148,10 @@ def test_firebase_unreachable_is_503(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_does_not_depend_on_repositories() -> None:
-    # Firestore ainda não implementado: rotas de dados respondem 501, mas /me continua funcionando.
+    # Firestore inacessível: rotas de dados respondem 503, mas /me continua funcionando.
     settings = make_settings(data_backend="firestore", firebase_project_id="demo", admin_allowed_uids=ADMIN_UID)
-    with build_client(settings, verifier=default_verifier()) as c:
-        assert c.get("/api/v1/admin/products", headers=ADMIN).status_code == 501
+    with build_client(settings, unreachable_firestore_repos(settings), verifier=default_verifier()) as c:
+        assert c.get("/api/v1/admin/products", headers=ADMIN).status_code == 503
         r = c.get(ME, headers=ADMIN)
     assert r.status_code == 200
 

@@ -23,7 +23,7 @@ class AppEnv(StrEnum):
 class DataBackend(StrEnum):
     # Em memória, por processo: só para testes e desenvolvimento isolado.
     MEMORY = "memory"
-    # Cloud Firestore: contrato definido, implementação na próxima etapa.
+    # Cloud Firestore (real ou, em desenvolvimento, o emulador local).
     FIRESTORE = "firestore"
 
 
@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     firestore_database_id: str = "(default)"
     # Definida pelo Firebase Emulator Suite. Com ela, o SDK aceita tokens NÃO assinados.
     firebase_auth_emulator_host: str | None = None
+    # Definida pelo Firebase Emulator Suite (host:porta, sem http://). O SDK do Firestore a lê do
+    # ambiente do processo; este campo serve para validar a configuração (ver core/firestore.py).
+    firestore_emulator_host: str | None = None
 
     # UIDs do Firebase Authentication com acesso ao painel. Vazio = ninguém é administrador.
     admin_allowed_uids: Annotated[frozenset[str], NoDecode] = Field(default_factory=frozenset)
@@ -101,6 +104,8 @@ class Settings(BaseSettings):
             problems.append(
                 "FIREBASE_AUTH_EMULATOR_HOST não pode estar definido (desativa a verificação de assinatura dos tokens)."
             )
+        if self.firestore_emulator_host:
+            problems.append("FIRESTORE_EMULATOR_HOST não pode estar definido (os dados iriam para o emulador local).")
         if self.firebase_service_account_json is not None and not _is_service_account(
             self.firebase_service_account_json.get_secret_value()
         ):
