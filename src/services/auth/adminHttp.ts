@@ -6,6 +6,7 @@ import { authErrorCode, type AuthUser } from './authClient';
  * - O token vem sempre do SDK (`getIdToken`), que o renova quando expira; nada é guardado aqui.
  * - `401` → tenta uma vez com token renovado à força (o anterior pode ter expirado no caminho).
  * - Sem cache e sem cookies: a autorização vai só no cabeçalho `Authorization`.
+ * - `init.signal` (escopo da sessão + tempo limite) é respeitado antes do token, depois dele e no fetch.
  *
  * Futuras chamadas administrativas (TASK 06/07) devem passar por `request` em vez de repetir essa lógica.
  */
@@ -17,7 +18,11 @@ export function createAdminHttp(baseUrl: string): AdminHttp {
   return {
     async request(user, path, init = {}) {
       const send = async (forceRefresh: boolean) => {
+        // `getIdToken` não aceita AbortSignal: a sessão é conferida antes e depois de obter o token,
+        // para que nada seja enviado se ela terminou enquanto o token era obtido.
+        init.signal?.throwIfAborted();
         const token = await user.getIdToken(forceRefresh);
+        init.signal?.throwIfAborted();
         const headers = new Headers(init.headers);
         headers.set('Authorization', `Bearer ${token}`);
         headers.set('Accept', 'application/json');

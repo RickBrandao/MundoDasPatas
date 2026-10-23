@@ -24,6 +24,8 @@ export interface ConfirmOptions {
   text: string;
   ok: string;
   danger?: boolean;
+  /** Abortado (ex.: fim da sessão do painel), o diálogo fecha sozinho e responde "não". */
+  signal?: AbortSignal;
 }
 export type ConfirmFn = (o: ConfirmOptions) => Promise<boolean>;
 export const ConfirmContext = createContext<ConfirmFn | null>(null);
@@ -55,6 +57,8 @@ export interface StoreContextValue {
   storageFail: boolean;
   /** false quando o navegador não oferece armazenamento persistente (ex.: modo privado restrito). */
   persistent: boolean;
+  /** Gravações enviadas e ainda sem resposta. */
+  pendingWrites: number;
   actions: StoreActions;
 }
 export const StoreContext = createContext<StoreContextValue | null>(null);

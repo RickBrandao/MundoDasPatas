@@ -33,6 +33,11 @@ export type ApiResult<T = object> =
       storageFull?: boolean;
       /** Sem resposta do servidor: a operação pode ter sido aplicada. */
       unknownOutcome?: boolean;
+      /**
+       * A sessão administrativa terminou (logout, expiração, revogação, troca de usuário) durante a operação.
+       * A interface não deve reagir; se a requisição já tinha saído, o resultado no servidor é desconhecido.
+       */
+      aborted?: boolean;
       /** Estado relido do servidor após a falha (conflito, registro ausente ou resultado desconhecido). */
       refreshed?: { data: StoreData; dashboard?: DashboardSummary };
     };
@@ -56,6 +61,8 @@ export interface MutationOptions {
 
 export interface StoreApi {
   readonly source: StoreSource;
+  /** Escopo da sessão (somente `api-admin`): abortado, nenhum resultado desta API deve alterar a tela. */
+  readonly signal?: AbortSignal;
   load(): Promise<LoadResult>;
   saveProduct(input: ProductFormInput): Promise<ApiResult<{ product: Product }>>;
   patchProduct(id: string, flags: ProductFlags): Promise<ApiResult>;

@@ -61,7 +61,10 @@ ruff check .                  # lint
 ruff format --check .         # formatação
 ```
 
-Testes de integração do Firestore (separados; exigem o emulador ativo — ver
+Automático (sobe e encerra emuladores e API, sem credenciais reais), na raiz do repositório:
+`npm run test:integration:emulator` — ver [`docs/integracao-api.md` §5](../docs/integracao-api.md).
+
+Manual: testes de integração do Firestore (separados; exigem o emulador ativo — ver
 [`docs/firestore.md` §4](../docs/firestore.md#4-firestore-emulator-no-windows)):
 
 ```powershell

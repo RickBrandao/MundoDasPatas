@@ -12,7 +12,9 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e:emulator": "vitest run --config vitest.e2e.config.ts"
+    "test:e2e:emulator": "node scripts/e2e-emulator.mjs",
+    "test:e2e:run": "vitest run --config vitest.e2e.config.ts",
+    "test:integration:emulator": "node scripts/e2e-emulator.mjs --with-backend"
   },
   "dependencies": {
     "firebase": "^12.19.0",

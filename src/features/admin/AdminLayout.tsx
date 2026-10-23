@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { useStore } from '../../app/contexts';
+import { useConfirm, useStore } from '../../app/contexts';
 import { Icon } from '../../components/Icon';
 import { asset } from '../../components/productArt';
 import type { Category, Product } from '../../domain/types';
@@ -20,7 +20,8 @@ type AdminModal =
   | null;
 
 export function AdminLayout() {
-  const { storageFail, persistent, source, stale, actions } = useStore();
+  const { storageFail, persistent, source, stale, actions, pendingWrites } = useStore();
+  const confirm = useConfirm();
   const remote = source === 'api-admin';
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -50,6 +51,20 @@ export function AdminLayout() {
     [],
   );
   const close = () => setModal(null);
+  // Com gravação sem resposta, sair interrompe a confirmação na tela, mas não desfaz o que o servidor já gravou.
+  const signOut = async () => {
+    if (!auth) return;
+    if (pendingWrites > 0) {
+      const yes = await confirm({
+        title: 'Operação em andamento',
+        text: 'Uma gravação ainda não teve resposta do servidor e pode já ter sido registrada no servidor. Se sair agora, confira Vendas e Estoque no próximo acesso.',
+        ok: 'Sair mesmo assim',
+        danger: true,
+      });
+      if (!yes) return;
+    }
+    await auth.signOut();
+  };
   const openStore = () => {
     navigate('/');
     window.scrollTo(0, 0);
@@ -86,7 +101,7 @@ export function AdminLayout() {
                   {remote ? 'Acesso autenticado; dados gravados no servidor.' : 'Acesso autenticado; os dados ainda são demonstrativos.'}
                   {signedInEmail && <span className="admin-side__user">{signedInEmail}</span>}
                 </div>
-                <button type="button" className="btn btn--secondary admin-side__store" onClick={() => void auth.signOut()}>
+                <button type="button" className="btn btn--secondary admin-side__store" onClick={() => void signOut()}>
                   <Icon name="logout" size={22} />
                   Sair
                 </button>
@@ -110,7 +125,7 @@ export function AdminLayout() {
                 <span className="admin-header__store-label">Ver loja</span>
               </button>
               {auth && (
-                <button type="button" className="btn btn--secondary admin-header__logout" onClick={() => void auth.signOut()} aria-label="Sair">
+                <button type="button" className="btn btn--secondary admin-header__logout" onClick={() => void signOut()} aria-label="Sair">
                   <Icon name="logout" size={22} />
                   <span className="admin-header__store-label">Sair</span>
                 </button>

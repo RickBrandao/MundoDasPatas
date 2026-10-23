@@ -14,8 +14,8 @@ Falha da API ou do Firestore mostra erro com "Tentar novamente" — nunca troca 
 O carrinho de encomendas continua no navegador (nos dois modos).
 
 O workflow do GitHub Pages fixa `VITE_ADMIN_AUTH_MODE=demo` e `VITE_STORE_DATA_SOURCE=local`. A escolha é
-resolvida no build: o pacote da demonstração não contém o cliente HTTP, o login nem a API administrativa
-(o chunk `AuthenticatedPanel` existe, mas nunca é baixado); o pacote real não contém os dados fictícios.
+resolvida no build: o pacote da demonstração não contém o cliente HTTP, o login, a API administrativa
+nem o chunk `AuthenticatedPanel` (eliminado na TASK 06E); o pacote real não contém os dados fictícios.
 
 ## 2. Arquitetura no frontend
 
@@ -79,25 +79,29 @@ npm run dev   # http://localhost:5173/MundoDasPatas/
 
 ## 5. Testes de ponta a ponta com o Firebase Emulator Suite
 
-Projeto fictício `demo-mundo-das-patas-test` (projetos `demo-*` não existem na nuvem). Nenhuma credencial real.
+Um único comando (Windows PowerShell, Linux ou macOS), sem credenciais Google reais:
 
 ```powershell
-firebase emulators:start --only firestore,auth --project demo-mundo-das-patas-test   # 8181 e 9099
-
-# API ligada só aos emuladores (porta 8010)
-cd backend
-$env:APP_ENV="local"; $env:DATA_BACKEND="firestore"; $env:FIREBASE_PROJECT_ID="demo-mundo-das-patas-test"
-$env:FIRESTORE_EMULATOR_HOST="127.0.0.1:8181"; $env:FIREBASE_AUTH_EMULATOR_HOST="127.0.0.1:9099"
-$env:ADMIN_ALLOWED_UIDS="e2e-admin-uid"; $env:CORS_ORIGINS="http://localhost:5174"
-.\.venv\Scripts\python -m uvicorn app.main:app --port 8010
-
-# Smoke test (camada de dados do React → API → emulador), na raiz:
-npm run test:e2e:emulator
+npm run test:e2e:emulator            # emuladores + FastAPI + smoke React → API → Firestore Emulator
+npm run test:integration:emulator    # idem, rodando antes os 32 testes do backend no emulador
+npm run test:e2e:emulator -- --keep-logs   # mantém a pasta de logs
 ```
 
-O smoke test aborta antes de gravar se o projeto não for `demo-*` ou se `/health` não informar
-`database: emulator`, apaga os dados do emulador, cria os usuários de teste no Auth Emulator e confere
-os documentos diretamente no emulador.
+`scripts/e2e-emulator.mjs`:
+
+1. confere Firebase CLI, Java e o Python de `backend/.venv` (executados sem shell);
+2. escolhe portas livres a partir de 8181/9150/9099/4400/4500/8010 — porta ocupada por outro programa é
+   mantida e a próxima livre é usada (nenhum processo alheio é encerrado);
+3. sobe Firestore + Auth Emulator com uma configuração temporária, projeto `demo-mundo-das-patas-test`;
+4. sobe o FastAPI com `cwd` numa pasta temporária (o `backend/.env`, que aponta para o projeto real, não é
+   lido), sem `GOOGLE_APPLICATION_CREDENTIALS` e com `CLOUDSDK_CONFIG` vazio (o ADC do usuário não é encontrado);
+5. recusa continuar se o projeto não for `demo-*`, se faltar `FIRESTORE_EMULATOR_HOST`/`FIREBASE_AUTH_EMULATOR_HOST`,
+   se apontarem para fora de 127.0.0.1 ou se `/health` não informar `database: emulator`;
+6. roda `vitest --config vitest.e2e.config.ts` (o teste também se recusa a rodar fora desse ambiente);
+7. encerra a árvore de cada processo iniciado (`taskkill /T` no Windows) e confere que todos saíram e que
+   as portas foram liberadas — caso contrário o comando termina com erro.
+
+`npm run test:e2e:run` executa só o Vitest (serviços já no ar, variáveis definidas manualmente).
 
 Navegador contra os emuladores (somente `vite` dev; `VITE_FIREBASE_AUTH_EMULATOR_HOST` é ignorada em builds):
 
@@ -106,10 +110,42 @@ $env:VITE_ADMIN_AUTH_MODE="firebase"; $env:VITE_STORE_DATA_SOURCE="api"; $env:VI
 $env:VITE_FIREBASE_API_KEY="fake-api-key"; $env:VITE_FIREBASE_AUTH_DOMAIN="demo-mundo-das-patas-test.firebaseapp.com"
 $env:VITE_FIREBASE_PROJECT_ID="demo-mundo-das-patas-test"; $env:VITE_FIREBASE_APP_ID="1:000:web:e2e"
 $env:VITE_FIREBASE_MESSAGING_SENDER_ID="000"; $env:VITE_FIREBASE_AUTH_EMULATOR_HOST="127.0.0.1:9099"
-npx vite --port 5174   # login: admin@e2e.test (usuário criado pelo smoke test no emulador)
+npx vite --port 5174
 ```
 
-## 6. Pendências
+## 6. Ciclo de vida da sessão administrativa (TASK 06E)
+
+Cada autorização (`GET /admin/me` = 200) abre um escopo com um `AbortController` novo, entregue ao painel
+em `session.signal`. Logout, expiração, revogação (401/403 → reverificação → acesso negado), troca de
+usuário, nova verificação não silenciosa e desmontagem do painel **abortam** o escopo. Uma revalidação
+silenciosa do mesmo usuário mantém o escopo; um escopo abortado nunca é reutilizado.
+
+Com o escopo abortado:
+
+| Ponto | Comportamento |
+| --- | --- |
+| Antes do token (`getIdToken`) | nada é pedido |
+| Depois do token, antes do fetch | nada é enviado (o SDK não aceita AbortSignal; a sessão é conferida antes e depois) |
+| Fetch em andamento | recebe o abort (o sinal da sessão é combinado com o tempo limite, não substituído) |
+| Resposta que chega depois | descartada antes de ser lida/aplicada |
+| Espera entre tentativas | termina na hora (timer e listener liberados); nenhuma nova tentativa sai |
+| Releitura após escrita | não acontece |
+| `StoreProvider` | não aplica resultados; o painel é desmontado |
+| Toasts / confirmações do painel | mensagens tardias são descartadas; diálogos abertos fecham ("não") |
+
+**Limite — abort não é rollback.** Uma venda que já chegou ao FastAPI e foi confirmada no Firestore
+continua registrada; o cliente não tenta desfazer nem compensar nada. Por isso:
+
+- ao clicar em **Sair** com gravação sem resposta, o painel pede confirmação ("pode já ter sido registrada
+  no servidor"); a escolha é do usuário e nunca bloqueia indefinidamente;
+- se a sessão termina com gravação sem resposta, a tela de login informa que a operação pode ter sido
+  concluída e deve ser conferida em Vendas/Estoque no próximo acesso;
+- no próximo acesso tudo é relido do servidor; a idempotência (chave por intenção, 24 h) segue valendo
+  para novas tentativas da mesma operação no mesmo painel aberto.
+
+Não há revogação global de tokens no logout (afetaria outras sessões do mesmo usuário e não desfaria nada).
+
+## 7. Pendências
 
 - Upload de imagens (Cloud Storage).
 - Histórico além das 500 vendas/movimentações mais recentes (paginação).

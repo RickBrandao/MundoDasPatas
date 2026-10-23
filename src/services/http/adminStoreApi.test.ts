@@ -194,3 +194,50 @@ describe('createAdminStoreApi (FastAPI simulado)', () => {
     expect((await api.resetDemo()).ok).toBe(false);
   });
 });
+
+describe('createAdminStoreApi com o escopo da sessão (TASK 06E)', () => {
+  it('sessão encerrada durante a espera de nova tentativa: a espera termina e nada mais é enviado', async () => {
+    backend.seedCategory('Rações');
+    const pid = backend.seedProduct({ categoryId: backend.db.categories[0].id, name: 'Ração', stock: 5 }).id;
+    const controller = new AbortController();
+    const api = adminApi({ signal: controller.signal, sleep: undefined, retryDelaysMs: [60_000] });
+    await api.load();
+    backend.failNext('POST', '/api/v1/admin/sales', json(503, { error: { code: 'database_busy', message: 'x' } }));
+    const pending = api.registerSale([{ productId: pid, qty: 1 }], { idempotencyKey: 'k-sessao-0001' });
+    await vi.waitFor(() => expect(backend.calls.filter((c) => c.method === 'POST')).toHaveLength(1));
+    const started = Date.now();
+    controller.abort();
+    const r = await pending;
+    expect(Date.now() - started).toBeLessThan(1000); // não esperou os 60 s
+    expect(r).toMatchObject({ ok: false, aborted: true, unknownOutcome: true });
+    expect(backend.calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+  });
+
+  it('resposta de escrita que chega após o fim da sessão não é aplicada nem relida', async () => {
+    backend.seedCategory('Rações');
+    const controller = new AbortController();
+    const api = adminApi({ signal: controller.signal });
+    await api.load();
+    const held = backend.hold('POST', '/api/v1/admin/categories', { apply: 'after', ignoreAbort: true });
+    const pending = api.saveCategory({ id: null, name: 'Petiscos' });
+    await held.arrived;
+    controller.abort();
+    const before = backend.calls.length;
+    held.release();
+    expect(await pending).toMatchObject({ ok: false, aborted: true });
+    expect(backend.calls.length).toBe(before); // nenhuma releitura
+    expect(backend.db.categories).toHaveLength(2); // o servidor gravou: nada é desfeito pelo cliente
+  });
+
+  it('com a sessão encerrada, nenhuma leitura ou escrita sai', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const api = adminApi({ signal: controller.signal });
+    await expect(api.load()).rejects.toThrow();
+    expect(await api.saveSettings({ storeName: 'X', whatsapp: '(11) 98888-7777', address: '', hours: '', about: '', showOutOfStock: true, showFeatured: true })).toMatchObject({
+      ok: false,
+      aborted: true,
+    });
+    expect(backend.calls).toHaveLength(0);
+  });
+});

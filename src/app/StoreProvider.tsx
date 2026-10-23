@@ -37,19 +37,21 @@ export function StoreProvider({ api, children }: Props) {
   const [stale, setStale] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  /** Gravações enviadas e ainda sem resposta (aviso ao sair do painel). */
+  const [pendingWrites, setPendingWrites] = useState(0);
 
   useEffect(() => {
     let alive = true;
     api
       .load()
       .then((r) => {
-        if (!alive) return;
+        if (!alive || api.signal?.aborted) return;
         loadedAt.set(api, Date.now());
         setSnapshot({ data: r.data, dashboard: r.dashboard });
         setPersistent(r.persistent);
         setLoadError(null);
       })
-      .catch((error: unknown) => alive && setLoadError(loadErrorMessage(api, error)));
+      .catch((error: unknown) => alive && !api.signal?.aborted && setLoadError(loadErrorMessage(api, error)));
     return () => {
       alive = false;
     };
@@ -58,6 +60,8 @@ export function StoreProvider({ api, children }: Props) {
   // Depois de desmontado (ex.: logout no painel) as atualizações são simplesmente descartadas pelo React.
   const accept = useCallback(
     (data: StoreData, dashboard?: DashboardSummary) => {
+      // Resultado de uma sessão administrativa já encerrada: nunca chega à tela.
+      if (api.signal?.aborted) return;
       loadedAt.set(api, Date.now());
       setSnapshot((s) => ({ data, dashboard: dashboard ?? s?.dashboard }));
     },
@@ -65,8 +69,15 @@ export function StoreProvider({ api, children }: Props) {
   );
 
   const actions = useMemo<StoreActions>(() => {
-    const apply = async <R extends ApiResult<object>>(p: Promise<R>): Promise<R> => {
-      const r = await p;
+    const apply = async <R extends ApiResult<object>>(run: () => Promise<R>): Promise<R> => {
+      setPendingWrites((n) => n + 1);
+      let r: R;
+      try {
+        r = await run();
+      } finally {
+        setPendingWrites((n) => n - 1);
+      }
+      if (api.signal?.aborted || (!r.ok && r.aborted)) return r;
       if (r.ok) {
         accept(r.data, r.dashboard);
         setStorageFail(!r.persisted);
@@ -78,19 +89,20 @@ export function StoreProvider({ api, children }: Props) {
       return r;
     };
     return {
-      saveProduct: (i) => apply(api.saveProduct(i)),
-      patchProduct: (id, f) => apply(api.patchProduct(id, f)),
-      moveStock: (i, o) => apply(api.moveStock(i, o)),
-      registerSale: (items, o) => apply(api.registerSale(items, o)),
-      cancelSale: (id, o) => apply(api.cancelSale(id, o)),
-      saveCategory: (i) => apply(api.saveCategory(i)),
-      toggleCategory: (id) => apply(api.toggleCategory(id)),
-      saveSettings: (s) => apply(api.saveSettings(s)),
-      resetDemo: () => apply(api.resetDemo()),
+      saveProduct: (i) => apply(() => api.saveProduct(i)),
+      patchProduct: (id, f) => apply(() => api.patchProduct(id, f)),
+      moveStock: (i, o) => apply(() => api.moveStock(i, o)),
+      registerSale: (items, o) => apply(() => api.registerSale(items, o)),
+      cancelSale: (id, o) => apply(() => api.cancelSale(id, o)),
+      saveCategory: (i) => apply(() => api.saveCategory(i)),
+      toggleCategory: (id) => apply(() => api.toggleCategory(id)),
+      saveSettings: (s) => apply(() => api.saveSettings(s)),
+      resetDemo: () => apply(() => api.resetDemo()),
       refresh: async (maxAgeMs = 0) => {
         if (maxAgeMs > 0 && Date.now() - (loadedAt.get(api) ?? 0) < maxAgeMs) return;
         try {
           const r = await api.load();
+          if (api.signal?.aborted) return;
           accept(r.data, r.dashboard);
           setStale(false);
         } catch {
@@ -103,9 +115,9 @@ export function StoreProvider({ api, children }: Props) {
   const value = useMemo<StoreContextValue | null>(
     () =>
       snapshot
-        ? { data: snapshot.data, dashboard: snapshot.dashboard, source: api.source, stale, storageFail, persistent, actions }
+        ? { data: snapshot.data, dashboard: snapshot.dashboard, source: api.source, stale, storageFail, persistent, pendingWrites, actions }
         : null,
-    [snapshot, api.source, stale, storageFail, persistent, actions],
+    [snapshot, api.source, stale, storageFail, persistent, pendingWrites, actions],
   );
 
   if (loadError && !value) {

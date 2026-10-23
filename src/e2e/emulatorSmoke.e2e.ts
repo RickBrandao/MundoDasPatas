@@ -7,9 +7,8 @@
  * - `GET /health` da API precisa informar `database.status = "emulator"`;
  * - os documentos gravados pela API são lidos diretamente no emulador, provando a conexão.
  *
- * Variáveis: E2E_API_URL (padrão http://127.0.0.1:8010), E2E_PROJECT_ID (demo-mundo-das-patas-test),
- * FIRESTORE_EMULATOR_HOST (127.0.0.1:8181), FIREBASE_AUTH_EMULATOR_HOST (127.0.0.1:9099).
- * A API deve rodar com ADMIN_ALLOWED_UIDS=e2e-admin-uid.
+ * Executar com `npm run test:e2e:emulator`: o runner sobe emuladores e API e define E2E_API_URL,
+ * E2E_PROJECT_ID, FIRESTORE_EMULATOR_HOST e FIREBASE_AUTH_EMULATOR_HOST (todas obrigatórias, locais).
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { AuthUser } from '../services/auth/authClient';
@@ -18,10 +17,12 @@ import { createAdminStoreApi } from '../services/http/adminStoreApi';
 import { createPublicStoreApi } from '../services/http/publicStoreApi';
 import type { StoreApi } from '../services/storeApi';
 
-const API_URL = process.env.E2E_API_URL ?? 'http://127.0.0.1:8010';
-const PROJECT = process.env.E2E_PROJECT_ID ?? 'demo-mundo-das-patas-test';
-const FIRESTORE = process.env.FIRESTORE_EMULATOR_HOST ?? '127.0.0.1:8181';
-const AUTH = process.env.FIREBASE_AUTH_EMULATOR_HOST ?? '127.0.0.1:9099';
+// Definidas por scripts/e2e-emulator.mjs (`npm run test:e2e:emulator`). Sem padrões: ausência aborta.
+const API_URL = process.env.E2E_API_URL ?? '';
+const PROJECT = process.env.E2E_PROJECT_ID ?? '';
+const FIRESTORE = process.env.FIRESTORE_EMULATOR_HOST ?? '';
+const AUTH = process.env.FIREBASE_AUTH_EMULATOR_HOST ?? '';
+const LOOPBACK = /^(127\.0\.0\.1|localhost)(:\d+)?$/;
 const ADMIN_UID = 'e2e-admin-uid';
 const OTHER_UID = 'e2e-intruso-uid';
 
@@ -73,7 +74,9 @@ let admin: AuthUser;
 let api: StoreApi;
 
 beforeAll(async () => {
-  if (!PROJECT.startsWith('demo-')) throw new Error(`Projeto ${PROJECT} não é de emulação: abortado.`);
+  if (!PROJECT.startsWith('demo-')) throw new Error(`Projeto ${PROJECT || '(ausente)'} não é de emulação: abortado.`);
+  if (!LOOPBACK.test(FIRESTORE) || !LOOPBACK.test(AUTH)) throw new Error('FIRESTORE_EMULATOR_HOST/FIREBASE_AUTH_EMULATOR_HOST ausentes ou fora da máquina local: abortado.');
+  if (!LOOPBACK.test(new URL(API_URL || 'http://invalido').host)) throw new Error('E2E_API_URL ausente ou fora da máquina local: abortado.');
   const health = (await (await fetch(`${API_URL}/health`)).json()) as { dependencies: { database: { status: string } } };
   if (health.dependencies.database.status !== 'emulator') throw new Error('A API não está ligada ao Firestore Emulator: abortado.');
   // Banco do emulador limpo (somente o emulador aceita esta rota).

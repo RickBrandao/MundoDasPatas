@@ -19,7 +19,20 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
   const confirm = useCallback(
     (o: ConfirmOptions) =>
       new Promise<boolean>((resolve) => {
-        setPending({ ...o, resolve });
+        if (o.signal?.aborted) return resolve(false);
+        const onAbort = () => {
+          resolve(false);
+          setPending((p) => (p === entry ? null : p));
+        };
+        const entry = {
+          ...o,
+          resolve: (v: boolean) => {
+            o.signal?.removeEventListener('abort', onAbort);
+            resolve(v);
+          },
+        };
+        o.signal?.addEventListener('abort', onAbort, { once: true });
+        setPending(entry);
       }),
     [],
   );

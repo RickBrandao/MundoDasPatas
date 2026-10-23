@@ -42,6 +42,9 @@ export interface JsonRequest {
 
 /** Envia e devolve o corpo JSON de uma resposta 2xx; qualquer outra situação vira `ApiRequestError`. */
 export async function requestJson(send: Send, path: string, req: JsonRequest = {}): Promise<unknown> {
+  // Sessão já encerrada (ou chamada cancelada): nada é enviado.
+  if (req.signal?.aborted) throw new ApiRequestError({ kind: 'aborted' });
+  // Controlador local só para o tempo limite; ele segue o sinal de quem chamou (não o substitui).
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -49,7 +52,6 @@ export async function requestJson(send: Send, path: string, req: JsonRequest = {
     controller.abort();
   }, req.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const onAbort = () => controller.abort();
-  if (req.signal?.aborted) controller.abort();
   req.signal?.addEventListener('abort', onAbort);
 
   const headers: Record<string, string> = { Accept: 'application/json', ...req.headers };
@@ -70,7 +72,10 @@ export async function requestJson(send: Send, path: string, req: JsonRequest = {
     req.signal?.removeEventListener('abort', onAbort);
   }
 
+  // Resposta que chegou depois do cancelamento (ex.: logout): descartada sem ser interpretada.
+  if (req.signal?.aborted) throw new ApiRequestError({ kind: 'aborted' });
   const body: unknown = await response.json().catch(() => undefined);
+  if (req.signal?.aborted) throw new ApiRequestError({ kind: 'aborted' });
   if (!response.ok) throw new ApiRequestError(httpFailure(response.status, body));
   if (body === undefined) throw new ApiRequestError({ kind: 'invalid-response' });
   return body;

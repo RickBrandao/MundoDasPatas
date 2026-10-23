@@ -13,7 +13,10 @@ import { AdminLayout } from './AdminLayout';
 import { OverviewPage } from './OverviewPage';
 
 // Login, sessão e cliente da API administrativa: só baixados no modo Firebase + API.
-const AuthenticatedPanel = lazy(() => import('./AuthenticatedPanel'));
+// A condição é resolvida no build: no pacote da demonstração (`VITE_ADMIN_AUTH_MODE=demo`) o import
+// dinâmico some e o chunk nem é gerado. Os testes (`MODE=test`) exercitam os dois modos.
+const AuthenticatedPanel =
+  import.meta.env.VITE_ADMIN_AUTH_MODE === 'firebase' || import.meta.env.MODE === 'test' ? lazy(() => import('./AuthenticatedPanel')) : null;
 
 function PanelRoutes() {
   return (
@@ -55,6 +58,17 @@ export default function AdminRoutes() {
 
   // Demonstração (GitHub Pages): painel aberto com dados locais, como aprovado pelo cliente.
   if (access.mode === 'demo' || source.kind !== 'api') return <PanelRoutes />;
+
+  // Pacote gerado sem o modo Firebase (não acontece com a configuração de `services.ts`): bloqueia.
+  if (!AuthenticatedPanel) {
+    return (
+      <AuthShell title="Painel indisponível">
+        <div role="alert" className="alert alert--danger">
+          Este pacote foi gerado sem o login do painel (VITE_ADMIN_AUTH_MODE=firebase). O acesso permanece bloqueado.
+        </div>
+      </AuthShell>
+    );
+  }
 
   // Firebase + API: dados administrativos só depois de o servidor confirmar o acesso (AdminGate).
   return (

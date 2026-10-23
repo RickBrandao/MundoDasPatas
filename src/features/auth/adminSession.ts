@@ -11,7 +11,8 @@ export type AdminSession =
   | { status: 'signedOut'; notice: string | null }
   /** Usuário autenticado no Firebase; aguardando a confirmação do servidor. */
   | { status: 'verifying'; user: AuthUser }
-  | { status: 'authorized'; user: AuthUser }
+  /** `signal` é o escopo desta sessão: abortado quando ela termina (ver AdminAuthProvider). */
+  | { status: 'authorized'; user: AuthUser; signal: AbortSignal }
   | { status: 'forbidden'; user: AuthUser }
   /** O servidor não pôde confirmar o acesso (indisponível ou sem conexão). */
   | { status: 'unavailable'; user: AuthUser; message: string }
@@ -26,6 +27,8 @@ export interface AdminSessionValue {
   signOut(): Promise<void>;
   /** Repete a confirmação de acesso no servidor (após falha temporária). */
   retry(): void;
+  /** O painel informa quantas gravações estão em andamento (aviso ao sair). */
+  reportPendingWrites(count: number): void;
 }
 
 export const AdminSessionContext = createContext<AdminSessionValue | null>(null);

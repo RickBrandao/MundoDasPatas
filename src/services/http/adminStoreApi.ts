@@ -39,9 +39,15 @@ export interface AdminStoreApiOptions {
   send: Send;
   /** 401/403 em qualquer chamada: a sessão deve ser reconfirmada (`GET /admin/me`). */
   onAuthFailure?: () => void;
+  /**
+   * Escopo da sessão administrativa. Abortado: nada novo é enviado, requisições e esperas em andamento
+   * terminam e respostas tardias são descartadas (o que o servidor já gravou permanece gravado).
+   */
+  signal?: AbortSignal;
   newKey?: () => string;
   retryDelaysMs?: number[];
-  sleep?: (ms: number) => Promise<void>;
+  /** Espera entre tentativas; deve terminar cedo quando `signal` for abortado. */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
 type Failure = Extract<ApiResult, { ok: false }>;
@@ -58,14 +64,35 @@ type Failure = Extract<ApiResult, { ok: false }>;
 export function createAdminStoreApi({
   send,
   onAuthFailure,
+  signal,
   newKey = newIdempotencyKey,
   retryDelaysMs = RETRY_DELAYS_MS,
-  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  sleep = abortableSleep,
 }: AdminStoreApiOptions): StoreApi {
   let current: StoreData | null = null;
   let dashboard: DashboardSummary | undefined;
 
-  const get = (path: string) => requestJson(send, `${ADMIN}${path}`);
+  const get = (path: string) => requestJson(send, `${ADMIN}${path}`, { signal });
+
+  const ensureActive = () => {
+    if (signal?.aborted) throw new ApiRequestError({ kind: 'aborted' });
+  };
+
+  /** Espera entre tentativas que termina imediatamente se a sessão acabar. */
+  async function pause(ms: number) {
+    ensureActive();
+    await sleep(ms, signal);
+    ensureActive();
+  }
+
+  /** Sessão encerrada durante a operação: a interface não reage (sem mensagens, sem atualizar a tela). */
+  const abortedResult = (write: boolean): Failure => ({
+    ok: false,
+    aborted: true,
+    error: 'Operação interrompida: a sessão foi encerrada.',
+    // Uma escrita já enviada pode ter sido concluída no servidor; o próximo acesso mostra o estado real.
+    ...(write && { unknownOutcome: true }),
+  });
 
   async function fetchAll(): Promise<{ data: StoreData; dashboard: DashboardSummary }> {
     const [products, categories, sales, movements, settings, dash] = await Promise.all([
@@ -91,23 +118,28 @@ export function createAdminStoreApi({
   };
 
   async function write(path: string, req: JsonRequest, idempotent: boolean): Promise<unknown> {
-    const full = { ...req, timeoutMs: WRITE_TIMEOUT_MS };
+    const full = { ...req, timeoutMs: WRITE_TIMEOUT_MS, signal };
     for (let attempt = 0; ; attempt++) {
       try {
         return await requestJson(send, `${ADMIN}${path}`, full);
       } catch (error) {
+        if (signal?.aborted) throw new ApiRequestError({ kind: 'aborted' });
         if (!idempotent || attempt >= retryDelaysMs.length || !retryableWithSameKey(asFailure(error))) throw error;
-        await sleep(retryDelaysMs[attempt]);
+        await pause(retryDelaysMs[attempt]);
       }
     }
   }
 
   /** Escrita confirmada: relê tudo; se a releitura falhar, aplica a resposta recebida. */
   async function settle<T extends object>(merge: (d: StoreData) => StoreData, extra: T): Promise<ApiResult<T>> {
+    // Resposta de escrita que chegou depois do fim da sessão: não é aplicada nem anunciada.
+    if (signal?.aborted) return abortedResult(true) as ApiResult<T>;
     try {
       const fresh = await fetchAll();
+      if (signal?.aborted) return abortedResult(true) as ApiResult<T>;
       return { ok: true, data: fresh.data, persisted: true, dashboard: fresh.dashboard, ...extra } as ApiResult<T>;
     } catch {
+      if (signal?.aborted) return abortedResult(true) as ApiResult<T>;
       current = merge(state());
       return { ok: true, data: current, persisted: true, dashboard, stale: true, ...extra } as ApiResult<T>;
     }
@@ -116,6 +148,7 @@ export function createAdminStoreApi({
   /** Falha: mensagem segura; em conflito, ausência ou resultado desconhecido, os dados são relidos. */
   async function fail(error: unknown, idempotent: boolean, mapFields?: (f: ApiFailure) => Failure['fieldErrors']): Promise<Failure> {
     const f = asFailure(error);
+    if (f.kind === 'aborted' || signal?.aborted) return abortedResult(true);
     if (f.kind === 'http' && (f.status === 401 || f.status === 403)) onAuthFailure?.();
     const unknown = outcomeUnknown(f);
     let message = failureMessage(f);
@@ -130,6 +163,7 @@ export function createAdminStoreApi({
     if (unknown) result.unknownOutcome = true;
     if (unknown || (f.kind === 'http' && (f.status === 404 || f.status === 409))) {
       const fresh = await fetchAll().catch(() => null);
+      if (signal?.aborted) return abortedResult(true);
       if (fresh) result.refreshed = fresh;
     }
     return result;
@@ -143,14 +177,16 @@ export function createAdminStoreApi({
 
   return {
     source: 'api-admin',
+    signal,
 
     async load() {
       try {
         const r = await fetchAll();
+        ensureActive();
         return { data: r.data, source: 'server', persistent: true, dashboard: r.dashboard };
       } catch (error) {
         const f = asFailure(error);
-        if (f.kind === 'http' && (f.status === 401 || f.status === 403)) onAuthFailure?.();
+        if (!signal?.aborted && f.kind === 'http' && (f.status === 401 || f.status === 403)) onAuthFailure?.();
         throw error;
       }
     },
@@ -269,6 +305,20 @@ export function createAdminStoreApi({
       return { ok: false, error: 'Indisponível no ambiente real: os dados de demonstração nunca são importados para o servidor.' };
     },
   };
+}
+
+/** `setTimeout` cancelável: o timer e o listener são liberados no fim da espera ou no abort. */
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener('abort', done, { once: true });
+  });
 }
 
 function upsert<T extends { id: string }>(list: T[], item: T): T[] {

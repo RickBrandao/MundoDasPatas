@@ -73,6 +73,19 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 type Failure = Response | 'network';
+
+/**
+ * Requisição retida até `release()`. `apply: 'before'` = o servidor ainda não processou (retida na rede, na ida);
+ * `'after'` = já gravou e a resposta está retida (na volta). Com `ignoreAbort`, a resposta chega mesmo depois de
+ * o navegador abortar (simula uma resposta tardia que o cliente precisa descartar sozinho).
+ */
+export interface Hold {
+  apply: 'before' | 'after';
+  ignoreAbort?: boolean;
+  /** Preenchido quando a requisição chega. */
+  signal?: AbortSignal;
+  arrived: Promise<void>;
+}
 type Handler = (token: string) => Response | Promise<Response>;
 
 const err = (status: number, code: string, message: string, fieldErrors?: Record<string, string>) =>
@@ -98,6 +111,7 @@ export function createFakeBackend(options: { me?: Handler } = {}) {
   const calls: Call[] = [];
   const failures: { method: string; path: string; failure: Failure }[] = [];
   const lost: { method: string; path: string }[] = [];
+  const holds: (Hold & { method: string; path: string; release: () => void; gate: Promise<void> })[] = [];
   let me = options.me ?? allowAdmin;
 
   const settings = () => db.settings ?? DEFAULT_SETTINGS;
@@ -301,7 +315,25 @@ export function createFakeBackend(options: { me?: Handler } = {}) {
       if (failure.failure === 'network') throw new TypeError('Failed to fetch');
       return failure.failure.clone();
     }
+    const hold = take(holds, method, path);
+    const wait = async () => {
+      if (!hold) return;
+      hold.signal = init.signal ?? undefined;
+      (hold as unknown as { markArrived: () => void }).markArrived();
+      if (hold.ignoreAbort || !init.signal) return hold.gate;
+      // Como o fetch real: abortar rejeita imediatamente com AbortError.
+      await Promise.race([
+        hold.gate,
+        new Promise<never>((_, reject) => {
+          const fail = () => reject(new DOMException('The operation was aborted.', 'AbortError'));
+          if (init.signal!.aborted) fail();
+          init.signal!.addEventListener('abort', fail, { once: true });
+        }),
+      ]);
+    };
+    if (hold?.apply === 'before') await wait();
     const response = await route(method, path, token, headers.get('Idempotency-Key'), body);
+    if (hold?.apply === 'after') await wait();
     if (take(lost, method, path)) throw new TypeError('Failed to fetch');
     return response;
   });
@@ -320,6 +352,21 @@ export function createFakeBackend(options: { me?: Handler } = {}) {
     /** A próxima requisição (método + início do caminho) falha antes de chegar ao "banco". */
     failNext(method: string, path: string, failure: Failure) {
       failures.push({ method, path, failure });
+    },
+    /** Retém a próxima requisição (ver `Hold`). */
+    hold(method: string, path: string, options: { apply: 'before' | 'after'; ignoreAbort?: boolean }) {
+      let release!: () => void;
+      let markArrived!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      const arrived = new Promise<void>((r) => (markArrived = r));
+      const h = { ...options, method, path, gate, release, arrived, markArrived } as Hold & {
+        method: string;
+        path: string;
+        release: () => void;
+        gate: Promise<void>;
+      };
+      holds.push(h);
+      return h;
     },
     /** A próxima requisição é aplicada, mas a resposta não chega ao navegador. */
     loseNextResponse(method: string, path: string) {

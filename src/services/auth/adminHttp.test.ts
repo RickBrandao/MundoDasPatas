@@ -97,3 +97,35 @@ describe('mensagens de login', () => {
     expect(signInErrorMessage(err('auth/desconhecido'))).not.toContain('auth/');
   });
 });
+
+describe('adminHttp com o escopo da sessão (TASK 06E)', () => {
+  it('sessão encerrada enquanto o token era obtido: nada é enviado', async () => {
+    const fetchMock = stubFetch(json(200, {}));
+    const controller = new AbortController();
+    let release!: (t: string) => void;
+    const user = fakeUser();
+    user.getIdToken.mockImplementationOnce(() => new Promise((r) => (release = r)));
+    const pending = http.request(user, '/api/v1/admin/sales', { method: 'POST', signal: controller.signal });
+    controller.abort();
+    release('token-admin-uid');
+    await expect(pending).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sessão já encerrada: nem o token é pedido', async () => {
+    const fetchMock = stubFetch(json(200, {}));
+    const controller = new AbortController();
+    controller.abort();
+    const user = fakeUser();
+    await expect(http.request(user, '/api/v1/admin/products', { signal: controller.signal })).rejects.toThrow();
+    expect(user.getIdToken).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('o sinal da sessão chega ao fetch', async () => {
+    const fetchMock = stubFetch(json(200, {}));
+    const controller = new AbortController();
+    await http.request(fakeUser(), '/api/v1/admin/products', { signal: controller.signal });
+    expect(fetchMock.mock.calls[0][1]!.signal).toBe(controller.signal);
+  });
+});
