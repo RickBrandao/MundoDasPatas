@@ -748,6 +748,15 @@
 .admin-dev-notice {
   margin: 0;
 }
+.admin-stale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+}
 
 /* ---------------------------------------------------------------- Acesso ao painel (login) */
 .auth-page {

@@ -3,7 +3,9 @@ import type { CartLine } from '../domain/cart';
 import type { ProductFlags, ProductFormInput, StockMoveInput } from '../domain/operations';
 import type { Cart, Product, Sale, SaleItem, Settings, StoreData } from '../domain/types';
 import type { AdminAccess } from '../services/auth/adminAccess';
-import type { ApiResult } from '../services/storeApi';
+import type { DataSource } from '../services/dataSource';
+import type { DashboardSummary } from '../services/http/adapters';
+import type { ApiResult, MutationOptions, StoreSource } from '../services/storeApi';
 
 function useRequired<T>(ctx: React.Context<T | null>, name: string): T {
   const v = useContext(ctx);
@@ -31,16 +33,24 @@ export const useConfirm = () => useRequired(ConfirmContext, 'useConfirm');
 export interface StoreActions {
   saveProduct(input: ProductFormInput): Promise<ApiResult<{ product: Product }>>;
   patchProduct(id: string, flags: ProductFlags): Promise<ApiResult>;
-  moveStock(input: StockMoveInput): Promise<ApiResult<{ product: Product }>>;
-  registerSale(items: SaleItem[]): Promise<ApiResult<{ sale: Sale }>>;
-  cancelSale(saleId: string): Promise<ApiResult>;
+  moveStock(input: StockMoveInput, options?: MutationOptions): Promise<ApiResult<{ product: Product }>>;
+  registerSale(items: SaleItem[], options?: MutationOptions): Promise<ApiResult<{ sale: Sale }>>;
+  cancelSale(saleId: string, options?: MutationOptions): Promise<ApiResult>;
   saveCategory(input: { id: string | null; name: string }): Promise<ApiResult<{ created: boolean }>>;
   toggleCategory(id: string): Promise<ApiResult<{ active: boolean }>>;
   saveSettings(settings: Settings): Promise<ApiResult>;
   resetDemo(): Promise<ApiResult>;
+  /** Relê os dados da origem, se mais antigos que `maxAgeMs` (falha mantém o estado atual). */
+  refresh(maxAgeMs?: number): Promise<void>;
 }
 export interface StoreContextValue {
   data: StoreData;
+  /** `local` = demonstração no navegador; `api-*` = FastAPI + Firestore. */
+  source: StoreSource;
+  /** Indicadores calculados pelo servidor (somente no painel com a API). */
+  dashboard?: DashboardSummary;
+  /** true quando uma operação foi confirmada mas a releitura falhou (lista possivelmente desatualizada). */
+  stale: boolean;
   /** true quando a última gravação no navegador falhou (alterações só valem até recarregar). */
   storageFail: boolean;
   /** false quando o navegador não oferece armazenamento persistente (ex.: modo privado restrito). */
@@ -88,3 +98,7 @@ export const useUi = () => useRequired(UiContext, 'useUi');
 /** Modo de acesso ao painel (demonstração ou Firebase), escolhido em `services.ts`. */
 export const AdminAccessContext = createContext<AdminAccess | null>(null);
 export const useAdminAccess = () => useRequired(AdminAccessContext, 'useAdminAccess');
+
+/** Origem dos dados (`local` ou API), escolhida em `services.ts`. */
+export const DataSourceContext = createContext<DataSource | null>(null);
+export const useDataSource = () => useRequired(DataSourceContext, 'useDataSource');

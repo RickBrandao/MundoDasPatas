@@ -24,7 +24,7 @@ export function AuthShell({ title, children }: { title: string; children: ReactN
           Voltar à loja
         </Link>
       </main>
-      <p className="auth-page__env">Ambiente de desenvolvimento · dados demonstrativos</p>
+      <p className="auth-page__env">Ambiente de desenvolvimento</p>
     </div>
   );
 }

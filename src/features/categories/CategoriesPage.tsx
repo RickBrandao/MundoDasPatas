@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useStore, useToast } from '../../app/contexts';
 import { Icon } from '../../components/Icon';
 import { pluralize } from '../../domain/format';
@@ -9,6 +10,7 @@ export function CategoriesPage() {
   const ui = useAdminUi();
   const toast = useToast();
   const act = activeProducts(data.products);
+  const [busy, setBusy] = useState<string | null>(null);
 
   return (
     <div className="admin-page" data-screen-label="Admin · Categorias">
@@ -21,6 +23,12 @@ export function CategoriesPage() {
           Nova categoria
         </button>
       </div>
+      {data.categories.length === 0 && (
+        <div className="admin-empty">
+          <div className="admin-empty__title">Nenhuma categoria cadastrada</div>
+          <div style={{ fontSize: 14, marginTop: 4 }}>Cadastre a primeira categoria para começar a organizar o catálogo.</div>
+        </div>
+      )}
       <div className="cat-admin-grid">
         {data.categories.map((c) => {
           const n = act.filter((p) => p.categoryId === c.id).length;
@@ -43,8 +51,12 @@ export function CategoriesPage() {
                 <button
                   type="button"
                   className="btn btn--secondary btn--grow"
+                  disabled={busy === c.id}
                   onClick={async () => {
+                    if (busy) return;
+                    setBusy(c.id);
                     const r = await actions.toggleCategory(c.id);
+                    setBusy(null);
                     if (!r.ok) return toast(r.error);
                     toast(r.active ? 'Categoria ativada.' : 'Categoria desativada. Os produtos dela saem do catálogo.');
                   }}

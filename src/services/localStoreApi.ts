@@ -43,6 +43,8 @@ export function createLocalStoreApi({ storage, persistent = true, key = STORE_KE
   const wrap = (r: Result<StoreData>) => (r.ok ? { ok: true as const, value: { data: r.value } } : r);
 
   return {
+    source: 'local',
+
     async load() {
       const stored = parseStoredData(readJSON(storage, key));
       state = stored ?? createSeedData(now());

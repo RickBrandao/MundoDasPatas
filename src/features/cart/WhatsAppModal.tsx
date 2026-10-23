@@ -9,7 +9,7 @@ import { buildWhatsAppLink, openWhatsApp, WHATSAPP_REDIRECT_ENABLED } from '../.
  * Na demo nada é enviado. Nenhuma venda é registrada a partir daqui.
  */
 export function WhatsAppModal() {
-  const { data } = useStore();
+  const { data, source } = useStore();
   const { wa, setWa, setCartOpen } = useUi();
   const toast = useToast();
   if (!wa) return null;
@@ -51,7 +51,7 @@ export function WhatsAppModal() {
             <strong>
               {storeName} · {whatsapp}
             </strong>
-            <span className="wa-dialog__demo-tag">número demonstrativo</span>
+            {source === 'local' && <span className="wa-dialog__demo-tag">número demonstrativo</span>}
           </div>
           {!link.ok && (
             <div role="alert" className="alert alert--danger">
@@ -77,7 +77,7 @@ export function WhatsAppModal() {
               </span>
               <div style={{ minWidth: 0 }}>
                 <div className="wa-preview__name">{storeName}</div>
-                <div className="wa-preview__phone">{whatsapp} · demonstrativo</div>
+                <div className="wa-preview__phone">{source === 'local' ? `${whatsapp} · demonstrativo` : whatsapp}</div>
               </div>
             </div>
             <div className="wa-preview__chat">

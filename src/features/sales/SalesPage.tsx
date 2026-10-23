@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNow } from '../../app/useNow';
 import { useConfirm, useStore, useToast } from '../../app/contexts';
+import { useIdempotencyKeys } from '../../app/useIdempotencyKeys';
 import { Icon } from '../../components/Icon';
 import { SALE_STATUS } from '../../components/status';
 import { formatDateTime, units } from '../../domain/format';
@@ -8,6 +9,7 @@ import { completedSales, inPeriod, topSellers, unitsSold, type SalesPeriod } fro
 import { useAdminUi } from '../admin/adminContext';
 import { productName } from '../admin/productName';
 import { TopList } from '../admin/widgets';
+import { saleLabel } from './saleLabel';
 
 const PERIODS: [SalesPeriod, string][] = [
   ['7', '7 dias'],
@@ -22,6 +24,8 @@ export function SalesPage() {
   const confirm = useConfirm();
   const [period, setPeriod] = useState<SalesPeriod>('30');
   const [busy, setBusy] = useState<string | null>(null);
+  // Uma chave por venda: repetir o cancelamento depois de falha de rede não estorna duas vezes.
+  const keys = useIdempotencyKeys();
   const now = useNow();
   const done = completedSales(data.sales, period, now);
   const top = topSellers(data.sales, period, now);
@@ -29,17 +33,19 @@ export function SalesPage() {
 
   const cancel = async (id: string) => {
     if (busy) return;
+    const label = saleLabel(id);
     const yes = await confirm({
-      title: `Cancelar a venda ${id}?`,
+      title: `Cancelar a venda ${label}?`,
       text: 'Os itens voltam para o estoque e a venda fica marcada como cancelada.',
       ok: 'Cancelar e estornar',
       danger: true,
     });
     if (!yes) return;
     setBusy(id);
-    const r = await actions.cancelSale(id);
+    const r = await actions.cancelSale(id, { idempotencyKey: keys.keyFor(id) });
     setBusy(null);
-    toast(r.ok ? `Venda ${id} cancelada. Estoque estornado.` : r.error);
+    if (r.ok) keys.done(id);
+    toast(r.ok ? `Venda ${label} cancelada. Estoque estornado.` : r.error);
   };
 
   return (
@@ -86,7 +92,9 @@ export function SalesPage() {
                 return (
                   <div key={s.id} className="sale-card">
                     <div className="sale-card__head">
-                      <span className="sale-card__id">{s.id}</span>
+                      <span className="sale-card__id" title={s.id}>
+                        {saleLabel(s.id)}
+                      </span>
                       <span className={`badge badge--sm ${st.tone}`}>{st.label}</span>
                       <span className="sale-card__date">{formatDateTime(s.date)}</span>
                     </div>

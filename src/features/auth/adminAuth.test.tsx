@@ -1,12 +1,13 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../app/App';
 import type { AdminAccess } from '../../services/auth/adminAccess';
 import { createCartStorage } from '../../services/cartStorage';
-import { createLocalStoreApi } from '../../services/localStoreApi';
+import { createPublicStoreApi } from '../../services/http/publicStoreApi';
 import { createMemoryStorage } from '../../services/storage';
-import { createFakeAuth, deferred, fakeUser, json, type FakeUser } from '../../test/fakeAuth';
+import { API, createFakeAuth, deferred, fakeUser, json, type FakeUser } from '../../test/fakeAuth';
+import { createFakeBackend } from '../../test/fakeBackend';
 
 const ADMIN = fakeUser('admin-uid', 'dono@exemplo.com');
 const INTRUSO = fakeUser('intruso-uid', 'intruso@exemplo.com');
@@ -15,14 +16,9 @@ const ACCOUNTS = {
   'intruso@exemplo.com': { password: 'senha-intruso', user: INTRUSO },
 };
 
-/** Backend simulado: /admin/me responde conforme o token (ou a função dada). */
+/** Backend simulado (Firebase + API): /admin/me responde conforme o token (ou a função dada). */
 function stubApi(handler: (token: string) => Promise<Response> | Response) {
-  const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-    const token = new Headers(init?.headers).get('Authorization')?.replace('Bearer ', '') ?? '';
-    return handler(token);
-  });
-  vi.stubGlobal('fetch', fetchMock);
-  return fetchMock;
+  return createFakeBackend({ me: handler }).install();
 }
 
 const backendAllowlist = (token: string) =>
@@ -31,7 +27,9 @@ const backendAllowlist = (token: string) =>
 function renderApp(hash: string, access: AdminAccess) {
   window.location.hash = hash;
   const storage = createMemoryStorage();
-  render(<App api={createLocalStoreApi({ storage })} cartStorage={createCartStorage(storage)} adminAccess={access} />);
+  render(
+    <App api={createPublicStoreApi(API)} cartStorage={createCartStorage(storage)} adminAccess={access} dataSource={{ kind: 'api', apiBaseUrl: API }} />,
+  );
   return userEvent.setup();
 }
 
@@ -43,13 +41,17 @@ async function login(user: ReturnType<typeof userEvent.setup>, email: string, pa
   await user.click(screen.getByRole('button', { name: 'Entrar' }));
 }
 
+beforeEach(() => {
+  stubApi(backendAllowlist);
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe('painel com Firebase Authentication', () => {
   it('acesso direto sem sessão leva ao login, sem mostrar o painel', async () => {
-    const fetchMock = stubApi(backendAllowlist);
+    const backend = stubApi(backendAllowlist);
     const { access } = createFakeAuth();
     renderApp('#/admin/produtos', access);
     expect(await screen.findByRole('heading', { level: 1, name: 'Entrar' })).toBeInTheDocument();
@@ -58,12 +60,12 @@ describe('painel com Firebase Authentication', () => {
     expect(screen.getByLabelText('E-mail')).toHaveAttribute('type', 'email');
     expect(screen.getByLabelText('Senha')).toHaveAttribute('type', 'password');
     expect(screen.getByRole('link', { name: 'Voltar à loja' })).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(backend.adminCalls()).toHaveLength(0);
   });
 
   it('login válido: carrega, confirma no servidor e volta à página pedida', async () => {
     const me = deferred<Response>();
-    const fetchMock = stubApi(() => me.promise);
+    const backend = stubApi(() => me.promise);
     const { access, client } = createFakeAuth({ accounts: ACCOUNTS });
     const user = renderApp('#/admin/produtos', access);
 
@@ -75,8 +77,8 @@ describe('painel com Firebase Authentication', () => {
 
     me.resolve(json(200, { uid: 'admin-uid' }));
     expect(await screen.findByRole('heading', { level: 1, name: 'Produtos' })).toBeInTheDocument();
-    expect(new Headers(fetchMock.mock.calls[0][1]!.headers).get('Authorization')).toBe('Bearer token-admin-uid');
-    expect(screen.getByText(/dados demonstrativos armazenados neste navegador/)).toBeInTheDocument();
+    expect(backend.adminCalls()[0]).toMatchObject({ path: '/api/v1/admin/me', token: 'token-admin-uid' });
+    expect(screen.getByText(/dados reais gravados no Cloud Firestore/)).toBeInTheDocument();
     expect(screen.queryByText('Demonstração · sem login')).toBeNull();
   });
 
@@ -96,13 +98,13 @@ describe('painel com Firebase Authentication', () => {
   });
 
   it('credenciais inválidas mostram mensagem genérica e não abrem o painel', async () => {
-    const fetchMock = stubApi(backendAllowlist);
+    const backend = stubApi(backendAllowlist);
     const { access } = createFakeAuth({ accounts: ACCOUNTS });
     const user = renderApp('#/admin/login', access);
     await login(user, 'dono@exemplo.com', 'errada');
     expect(await screen.findByRole('alert')).toHaveTextContent('E-mail ou senha incorretos.');
     expect(panelHeading()).toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(backend.adminCalls()).toHaveLength(0);
   });
 
   it('campos vazios não chamam o Firebase', async () => {

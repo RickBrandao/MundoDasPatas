@@ -14,5 +14,7 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     css: false,
     restoreMocks: true,
+    // Fluxos completos de interface levam ~2 s isolados; com todos os arquivos em paralelo no Windows passam de 5 s.
+    testTimeout: 15_000,
   },
 });

@@ -1,7 +1,8 @@
 # Mundo das Patas — Backend (FastAPI)
 
-Fundação da API real do Mundo das Patas (TASK 04). O frontend React na raiz do repositório
-**continua usando os dados demonstrativos** (`localStoreApi`) e o GitHub Pages não foi alterado.
+Fundação da API real do Mundo das Patas (TASK 04). Desde a TASK 06C o frontend React consome esta API
+com `VITE_STORE_DATA_SOURCE=api` + `VITE_ADMIN_AUTH_MODE=firebase` (guia: [`docs/integracao-api.md`](../docs/integracao-api.md));
+a demonstração do GitHub Pages continua com os dados fictícios do navegador (`localStoreApi`).
 
 > **Situação:** arquitetura, contratos, segurança e regras de negócio prontos e testados.
 > **Persistência no Cloud Firestore implementada** (TASK 06B) e validada no Firestore Emulator —

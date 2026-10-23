@@ -30,6 +30,8 @@ jobs:
         env:
           # Publicação pública: sempre a demonstração, sem Firebase (explícito, não por omissão).
           VITE_ADMIN_AUTH_MODE: demo
+          # Dados fictícios no navegador: a demonstração não depende do FastAPI nem do Firestore.
+          VITE_STORE_DATA_SOURCE: local
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

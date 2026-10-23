@@ -6,7 +6,8 @@ import type { FieldErrors, Settings } from '../../domain/types';
 import { runSelfChecks } from './selfChecks';
 
 export function SettingsPage() {
-  const { data, actions } = useStore();
+  const { data, actions, source } = useStore();
+  const remote = source === 'api-admin';
   const { clear } = useCart();
   const toast = useToast();
   const confirm = useConfirm();
@@ -14,6 +15,7 @@ export function SettingsPage() {
   // Rascunho: só vale ao clicar em "Salvar configurações", como no protótipo.
   const [draft, setDraft] = useState<Settings>(() => ({ ...data.settings }));
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [saving, setSaving] = useState(false);
   const checks = useMemo(() => runSelfChecks(), []);
   const passed = checks.filter((c) => c.pass).length;
 
@@ -23,7 +25,10 @@ export function SettingsPage() {
   };
 
   const save = async () => {
+    if (saving) return;
+    setSaving(true);
     const r = await actions.saveSettings(draft);
+    setSaving(false);
     if (!r.ok) {
       setErrors(r.fieldErrors ?? {});
       return toast(r.error);
@@ -111,19 +116,30 @@ export function SettingsPage() {
         </section>
 
         <div className="admin-toolbar admin-toolbar--split">
-          <button type="button" className="btn btn--danger btn--md" style={{ padding: '0 16px' }} onClick={reset}>
-            Restaurar dados de demonstração
-          </button>
-          <button type="submit" className="btn btn--primary btn--md" style={{ fontSize: 15, padding: '0 22px' }}>
+          {remote ? (
+            <span />
+          ) : (
+            <button type="button" className="btn btn--danger btn--md" style={{ padding: '0 16px' }} onClick={reset}>
+              Restaurar dados de demonstração
+            </button>
+          )}
+          <button type="submit" className="btn btn--primary btn--md" style={{ fontSize: 15, padding: '0 22px' }} disabled={saving}>
             Salvar configurações
           </button>
         </div>
       </form>
 
-      <div className="notice notice--info">
-        Nesta demonstração os dados ficam salvos apenas neste navegador (armazenamento local, limitado a poucos MB). Fotos enviadas são comprimidas, mas muitas imagens podem esgotar o
-        espaço; na versão final elas irão para o armazenamento em nuvem. Nenhuma credencial é solicitada ou armazenada.
-      </div>
+      {remote ? (
+        <div className="notice notice--info">
+          As configurações ficam gravadas no servidor e valem para todos os acessos ao catálogo. Enquanto não forem salvas pela primeira vez, a loja usa os valores padrão (sem
+          número de WhatsApp).
+        </div>
+      ) : (
+        <div className="notice notice--info">
+          Nesta demonstração os dados ficam salvos apenas neste navegador (armazenamento local, limitado a poucos MB). Fotos enviadas são comprimidas, mas muitas imagens podem esgotar o
+          espaço; na versão final elas irão para o armazenamento em nuvem. Nenhuma credencial é solicitada ou armazenada.
+        </div>
+      )}
 
       <section className="panel panel--form" style={{ gap: 10 }}>
         <div className="panel-head" style={{ flexWrap: 'wrap' }}>

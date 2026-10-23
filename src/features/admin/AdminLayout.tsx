@@ -20,7 +20,8 @@ type AdminModal =
   | null;
 
 export function AdminLayout() {
-  const { storageFail, persistent } = useStore();
+  const { storageFail, persistent, source, stale, actions } = useStore();
+  const remote = source === 'api-admin';
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [modal, setModal] = useState<AdminModal>(null);
@@ -81,7 +82,8 @@ export function AdminLayout() {
             {auth ? (
               <>
                 <div className="admin-side__demo">
-                  <strong>Ambiente de desenvolvimento.</strong> Acesso autenticado; os dados ainda são demonstrativos.
+                  <strong>Ambiente de desenvolvimento.</strong>{' '}
+                  {remote ? 'Acesso autenticado; dados gravados no servidor.' : 'Acesso autenticado; os dados ainda são demonstrativos.'}
                   {signedInEmail && <span className="admin-side__user">{signedInEmail}</span>}
                 </div>
                 <button type="button" className="btn btn--secondary admin-side__store" onClick={() => void auth.signOut()}>
@@ -102,7 +104,7 @@ export function AdminLayout() {
             <div className="admin-header__bar">
               <img className="admin-header__logo" src={asset('assets/logo.png')} alt="Mundo das Patas" />
               <h1 className="admin-header__title">{tab.label}</h1>
-              <span className="admin-header__demo">{auth ? 'Desenvolvimento · dados locais' : 'Demonstração · sem login'}</span>
+              <span className="admin-header__demo">{remote ? 'Desenvolvimento · servidor' : auth ? 'Desenvolvimento · dados locais' : 'Demonstração · sem login'}</span>
               <button type="button" className="btn btn--secondary admin-header__store" onClick={openStore} aria-label="Ver loja">
                 <Icon name="storefront" size={22} />
                 <span className="admin-header__store-label">Ver loja</span>
@@ -126,10 +128,20 @@ export function AdminLayout() {
           <main className="admin-content">
             {auth && (
               <p className="notice notice--warn admin-dev-notice" role="note">
-                <strong>Ambiente de desenvolvimento</strong> — dados demonstrativos armazenados neste navegador.
+                <strong>Ambiente de desenvolvimento</strong> —{' '}
+                {remote ? 'dados reais gravados no Cloud Firestore (projeto de desenvolvimento).' : 'dados demonstrativos armazenados neste navegador.'}
               </p>
             )}
-            {(storageFail || !persistent) && (
+            {stale && (
+              <div role="alert" className="alert alert--danger admin-stale">
+                <span>A operação foi concluída, mas não foi possível atualizar as listas. Os dados exibidos podem estar desatualizados.</span>
+                <button type="button" className="btn btn--secondary" onClick={() => void actions.refresh()}>
+                  <Icon name="refresh" />
+                  Atualizar
+                </button>
+              </div>
+            )}
+            {!remote && (storageFail || !persistent) && (
               <div role="alert" className="alert alert--danger" style={{ padding: '12px 14px', borderRadius: 12 }}>
                 {persistent
                   ? 'Não foi possível salvar no armazenamento do navegador (espaço insuficiente). As alterações valem até recarregar a página. Remova imagens grandes ou restaure os dados de demonstração.'

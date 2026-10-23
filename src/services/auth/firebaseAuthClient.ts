@@ -1,6 +1,7 @@
 import { getApps, initializeApp } from 'firebase/app';
 import {
   browserSessionPersistence,
+  connectAuthEmulator,
   getAuth,
   initializeAuth,
   onAuthStateChanged,
@@ -36,5 +37,10 @@ function getOrInitAuth(config: FirebaseWebConfig): Auth {
   const existing = getApps().find((a) => a.name === APP_NAME);
   if (existing) return getAuth(existing);
   const app = initializeApp(config, APP_NAME);
-  return initializeAuth(app, { persistence: browserSessionPersistence });
+  const auth = initializeAuth(app, { persistence: browserSessionPersistence });
+  // Somente no servidor de desenvolvimento (`vite`), para testes de ponta a ponta com o Firebase Emulator Suite.
+  // Em qualquer build (`vite build`) `import.meta.env.DEV` é false e este ramo é eliminado.
+  const emulator = import.meta.env.DEV ? import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_HOST : undefined;
+  if (emulator) connectAuthEmulator(auth, `http://${emulator}`, { disableWarnings: true });
+  return auth;
 }

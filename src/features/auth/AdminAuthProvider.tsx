@@ -128,6 +128,11 @@ export function AdminAuthProvider({ access, children }: Props) {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [session, verify]);
 
+  // Estável: o painel (AdminStoreProvider) a usa sem ser recriado a cada atualização da sessão.
+  const retry = useCallback(() => {
+    if (userRef.current) verify(userRef.current);
+  }, [verify]);
+
   const value = useMemo<AdminSessionValue>(
     () => ({
       session,
@@ -142,11 +147,9 @@ export function AdminAuthProvider({ access, children }: Props) {
         }
       },
       signOut: () => endSession(MSG.loggedOut),
-      retry: () => {
-        if (userRef.current) verify(userRef.current);
-      },
+      retry,
     }),
-    [session, endSession, verify],
+    [session, endSession, retry],
   );
 
   return <AdminSessionContext.Provider value={value}>{children}</AdminSessionContext.Provider>;

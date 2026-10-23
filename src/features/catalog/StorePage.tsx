@@ -21,7 +21,7 @@ const STEPS = [
 ];
 
 export function StorePage() {
-  const { data } = useStore();
+  const { data, source, actions } = useStore();
   const { count } = useCart();
   const { cartOpen, setCartOpen, setWa, goToSection } = useUi();
   const openAdmin = useOpenAdmin();
@@ -29,6 +29,8 @@ export function StorePage() {
   const navigate = useNavigate();
   const [filters, setFilters] = useState<CatalogFilters>(DEFAULT_FILTERS);
   const { settings } = data;
+  // Com a API os dados são reais: sem os selos de "demonstrativo".
+  const demo = source === 'local';
 
   // Navegação vinda do painel para uma seção específica.
   const pendingSection = (location.state as { section?: string } | null)?.section;
@@ -38,6 +40,11 @@ export function StorePage() {
     navigate('.', { replace: true, state: null });
     return () => clearTimeout(t);
   }, [pendingSection, navigate]);
+
+  // Com a API, voltar à loja (ex.: depois de alterações no painel) relê o catálogo do servidor.
+  useEffect(() => {
+    if (source === 'api-public') void actions.refresh(5_000);
+  }, [source, actions]);
 
   const visible = useMemo(() => visibleProducts(data.products, data), [data]);
   const featured = useMemo(() => featuredProducts(data.products, data), [data]);
@@ -123,6 +130,7 @@ export function StorePage() {
             );
           })}
         </div>
+        {activeCats.length === 0 && <p className="catalog-empty-note">Em breve, novidades para o seu pet. Fale com a loja pelo WhatsApp.</p>}
       </section>
 
       {featured.length > 0 && (
@@ -174,7 +182,7 @@ export function StorePage() {
             <span className="eyebrow">Sobre nós</span>
             <h2 className="section-h2">Feito por quem ama bicho</h2>
             <p className="about__body">{settings.about}</p>
-            <span className="about__tag">Texto demonstrativo · editável em Configurações</span>
+            {demo && <span className="about__tag">Texto demonstrativo · editável em Configurações</span>}
           </div>
         </div>
       </section>
@@ -185,13 +193,13 @@ export function StorePage() {
           <h2>Fale com a gente</h2>
         </div>
         <div className="contact-grid">
-          <ContactCard icon="chat" tone="tone-ok" label="WhatsApp" note="Número demonstrativo">
+          <ContactCard icon="chat" tone="tone-ok" label="WhatsApp" note={demo ? 'Número demonstrativo' : undefined}>
             <div className="contact-card__value contact-card__value--big">{settings.whatsapp}</div>
           </ContactCard>
-          <ContactCard icon="location_on" tone="tone-peach" label="Endereço" note="Endereço demonstrativo">
+          <ContactCard icon="location_on" tone="tone-peach" label="Endereço" note={demo ? 'Endereço demonstrativo' : undefined}>
             <div className="contact-card__value">{settings.address}</div>
           </ContactCard>
-          <ContactCard icon="schedule" tone="tone-brown" label="Horário" note="Horário demonstrativo">
+          <ContactCard icon="schedule" tone="tone-brown" label="Horário" note={demo ? 'Horário demonstrativo' : undefined}>
             <div className="contact-card__value">{settings.hours}</div>
           </ContactCard>
         </div>
@@ -233,13 +241,13 @@ export function StorePage() {
             <div className="footer__heading">Institucional</div>
             <div className="footer__muted">Preços e disponibilidade confirmados pela loja no atendimento.</div>
             <button type="button" className="footer__admin" onClick={openAdmin}>
-              Painel administrativo (demo)
+              {demo ? 'Painel administrativo (demo)' : 'Painel administrativo'}
             </button>
           </div>
         </div>
         <div className="footer__bottom">
           <span>© 2026 {settings.storeName}. Todos os direitos reservados.</span>
-          <span>Demonstração · dados fictícios</span>
+          {demo && <span>Demonstração · dados fictícios</span>}
         </div>
         {showCartBar && <div className="cart-bar-spacer" />}
       </footer>
@@ -256,7 +264,7 @@ export function StorePage() {
   );
 }
 
-function ContactCard({ icon, tone, label, note, children }: { icon: string; tone: string; label: string; note: string; children: React.ReactNode }) {
+function ContactCard({ icon, tone, label, note, children }: { icon: string; tone: string; label: string; note?: string; children: React.ReactNode }) {
   return (
     <div className="info-card contact-card">
       <span className={`contact-card__icon ${tone}`}>
@@ -265,7 +273,7 @@ function ContactCard({ icon, tone, label, note, children }: { icon: string; tone
       <div style={{ minWidth: 0 }}>
         <div className="contact-card__label">{label}</div>
         {children}
-        <div className="contact-card__note">{note}</div>
+        {note && <div className="contact-card__note">{note}</div>}
       </div>
     </div>
   );

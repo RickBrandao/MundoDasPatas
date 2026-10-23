@@ -1,10 +1,9 @@
+import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { useAdminAccess } from '../../app/contexts';
+import { useAdminAccess, useDataSource } from '../../app/contexts';
+import { panelProblems } from '../../services/dataSource';
 import '../../styles/admin.css';
-import { AdminAuthProvider } from '../auth/AdminAuthProvider';
-import { AdminGate } from '../auth/AdminGate';
 import { AuthShell } from '../auth/AuthShell';
-import { LoginPage } from '../auth/LoginPage';
 import { CategoriesPage } from '../categories/CategoriesPage';
 import { StockPage } from '../inventory/StockPage';
 import { ProductsPage } from '../products/ProductsPage';
@@ -12,6 +11,9 @@ import { SalesPage } from '../sales/SalesPage';
 import { SettingsPage } from '../settings/SettingsPage';
 import { AdminLayout } from './AdminLayout';
 import { OverviewPage } from './OverviewPage';
+
+// Login, sessão e cliente da API administrativa: só baixados no modo Firebase + API.
+const AuthenticatedPanel = lazy(() => import('./AuthenticatedPanel'));
 
 function PanelRoutes() {
   return (
@@ -32,19 +34,18 @@ function PanelRoutes() {
 
 export default function AdminRoutes() {
   const access = useAdminAccess();
+  const source = useDataSource();
 
-  // Demonstração (GitHub Pages): painel aberto, como aprovado pelo cliente.
-  if (access.mode === 'demo') return <PanelRoutes />;
-
-  // Configuração inválida no modo autenticado: bloqueia (nunca cai para a demonstração).
-  if (access.mode === 'misconfigured') {
+  // Configuração inválida (autenticação ou origem dos dados): bloqueia — nunca cai para a demonstração.
+  const problems = access.mode === 'misconfigured' ? access.problems : panelProblems(access.mode, source);
+  if (access.mode === 'misconfigured' || problems.length > 0) {
     return (
       <AuthShell title="Painel indisponível">
         <div role="alert" className="alert alert--danger">
-          A autenticação do painel não está configurada corretamente neste ambiente. O acesso permanece bloqueado.
+          A autenticação ou a origem dos dados do painel não está configurada corretamente neste ambiente. O acesso permanece bloqueado.
         </div>
         <ul className="auth-card__problems">
-          {access.problems.map((p) => (
+          {problems.map((p) => (
             <li key={p}>{p}</li>
           ))}
         </ul>
@@ -52,19 +53,15 @@ export default function AdminRoutes() {
     );
   }
 
+  // Demonstração (GitHub Pages): painel aberto com dados locais, como aprovado pelo cliente.
+  if (access.mode === 'demo' || source.kind !== 'api') return <PanelRoutes />;
+
+  // Firebase + API: dados administrativos só depois de o servidor confirmar o acesso (AdminGate).
   return (
-    <AdminAuthProvider access={access}>
-      <Routes>
-        <Route path="login" element={<LoginPage />} />
-        <Route
-          path="*"
-          element={
-            <AdminGate>
-              <PanelRoutes />
-            </AdminGate>
-          }
-        />
-      </Routes>
-    </AdminAuthProvider>
+    <Suspense fallback={<div className="app-loading">Carregando painel…</div>}>
+      <AuthenticatedPanel access={access} apiBaseUrl={source.apiBaseUrl}>
+        <PanelRoutes />
+      </AuthenticatedPanel>
+    </Suspense>
   );
 }

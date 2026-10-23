@@ -8,11 +8,15 @@ export function CategoryFormModal({ category, onClose }: { category: Category | 
   const toast = useToast();
   const [name, setName] = useState(category?.name ?? '');
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
   const title = category ? 'Editar categoria' : 'Nova categoria';
 
   const save = async () => {
+    if (saving) return;
+    setSaving(true);
     const r = await actions.saveCategory({ id: category?.id ?? null, name });
-    if (!r.ok) return setError(r.error);
+    setSaving(false);
+    if (!r.ok) return setError(r.fieldErrors?.name ?? r.error);
     onClose();
     toast(r.created ? 'Categoria criada.' : 'Categoria atualizada.');
   };
@@ -50,7 +54,7 @@ export function CategoryFormModal({ category, onClose }: { category: Category | 
           <button type="button" className="btn btn--secondary btn--md" onClick={onClose}>
             Cancelar
           </button>
-          <button type="submit" className="btn btn--primary btn--md" style={{ padding: '0 22px' }}>
+          <button type="submit" className="btn btn--primary btn--md" style={{ padding: '0 22px' }} disabled={saving}>
             Salvar
           </button>
         </div>

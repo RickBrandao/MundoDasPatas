@@ -11,12 +11,14 @@ import { MovementRow, PanelHead, TopList } from './widgets';
 const plural = (n: number, s: string, p: string) => (n === 1 ? s : p);
 
 export function OverviewPage() {
-  const { data } = useStore();
+  const { data, dashboard } = useStore();
   const ui = useAdminUi();
   const navigate = useNavigate();
   const now = useNow();
-  const s = catalogSummary(data);
+  // Com a API, os indicadores vêm do servidor (`GET /admin/dashboard`), que considera todas as vendas.
+  const s = dashboard?.catalog ?? catalogSummary(data);
   const done30 = completedSales(data.sales, '30', now);
+  const sales30 = dashboard?.salesLast30Days ?? { count: done30.length, units: unitsSold(done30) };
   const top30 = topSellers(data.sales, '30', now);
 
   const offSub =
@@ -42,10 +44,10 @@ export function OverviewPage() {
     { l: 'Esgotados', v: s.out, i: 'block', tone: 'tone-out', sub: 'Estoque zerado' },
     {
       l: 'Unidades vendidas · 30 dias',
-      v: unitsSold(done30),
+      v: sales30.units,
       i: 'shopping_basket',
       tone: 'tone-peach',
-      sub: `${done30.length} venda${plural(done30.length, '', 's')} concluída${plural(done30.length, '', 's')}`,
+      sub: `${sales30.count} venda${plural(sales30.count, '', 's')} concluída${plural(sales30.count, '', 's')}`,
     },
   ];
 

@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { useStore, useToast } from '../../app/contexts';
+import { useIdempotencyKeys } from '../../app/useIdempotencyKeys';
 import { CloseButton, Modal } from '../../components/Modal';
 import { units } from '../../domain/format';
 import { addSaleLine } from '../../domain/operations';
 import { activeProducts } from '../../domain/reports';
 import type { SaleItem } from '../../domain/types';
 import { productName } from '../admin/productName';
+import { saleLabel } from './saleLabel';
 
 export function SaleModal({ onClose }: { onClose: () => void }) {
   const { data, actions } = useStore();
@@ -15,6 +17,8 @@ export function SaleModal({ onClose }: { onClose: () => void }) {
   const [qty, setQty] = useState('1');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  // Uma chave por conjunto de itens: a nova tentativa da mesma venda reutiliza a chave (sem duplicar).
+  const keys = useIdempotencyKeys();
 
   const options = activeProducts(data.products)
     .filter((p) => p.stock > 0)
@@ -32,11 +36,13 @@ export function SaleModal({ onClose }: { onClose: () => void }) {
   const confirmSale = async () => {
     if (saving) return; // evita registro duplicado por clique duplo
     setSaving(true);
-    const r = await actions.registerSale(lines);
+    const intent = JSON.stringify(lines);
+    const r = await actions.registerSale(lines, { idempotencyKey: keys.keyFor(intent) });
     setSaving(false);
     if (!r.ok) return setError(r.error);
+    keys.done(intent);
     onClose();
-    toast(`Venda ${r.sale.id} registrada. Estoque atualizado.`);
+    toast(`Venda ${saleLabel(r.sale.id)} registrada. Estoque atualizado.`);
   };
 
   return (
@@ -117,8 +123,8 @@ export function SaleModal({ onClose }: { onClose: () => void }) {
         <button type="button" className="btn btn--secondary btn--md" onClick={onClose}>
           Cancelar
         </button>
-        <button type="button" className="btn btn--primary btn--md" style={{ padding: '0 22px' }} onClick={confirmSale} disabled={saving}>
-          Confirmar venda
+        <button type="button" className="btn btn--primary btn--md" style={{ padding: '0 22px' }} onClick={confirmSale} disabled={saving} aria-busy={saving}>
+          {saving ? 'Registrando…' : 'Confirmar venda'}
         </button>
       </div>
     </Modal>

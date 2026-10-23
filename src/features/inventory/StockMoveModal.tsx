@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useStore, useToast } from '../../app/contexts';
+import { useIdempotencyKeys } from '../../app/useIdempotencyKeys';
 import { CloseButton, Modal } from '../../components/Modal';
 import { isNonNegativeIntString } from '../../domain/format';
 
@@ -16,14 +17,22 @@ export function StockMoveModal({ productId, initialType, onClose }: Props) {
   const [qty, setQty] = useState('');
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  // Uma chave por movimentação (tipo, quantidade, motivo): a nova tentativa não lança duas vezes.
+  const keys = useIdempotencyKeys();
   const p = data.products.find((x) => x.id === productId);
   if (!p) return null;
 
   const preview = isNonNegativeIntString(qty) ? `Estoque após a operação: ${type === 'entrada' ? p.stock + parseInt(qty, 10) : parseInt(qty, 10)} un.` : '';
 
   const save = async () => {
-    const r = await actions.moveStock({ productId, type, qty, note });
+    if (saving) return; // evita lançamento duplicado por clique duplo
+    setSaving(true);
+    const intent = JSON.stringify([productId, type, qty.trim(), note.trim()]);
+    const r = await actions.moveStock({ productId, type, qty, note }, { idempotencyKey: keys.keyFor(intent) });
+    setSaving(false);
     if (!r.ok) return setError(r.error);
+    keys.done(intent);
     onClose();
     toast(`Estoque atualizado: ${r.product.name} agora tem ${r.product.stock} un.`);
   };
@@ -95,8 +104,8 @@ export function StockMoveModal({ productId, initialType, onClose }: Props) {
           <button type="button" className="btn btn--secondary btn--md" onClick={onClose}>
             Cancelar
           </button>
-          <button type="submit" className="btn btn--primary btn--md" style={{ padding: '0 22px' }}>
-            Confirmar
+          <button type="submit" className="btn btn--primary btn--md" style={{ padding: '0 22px' }} disabled={saving} aria-busy={saving}>
+            {saving ? 'Salvando…' : 'Confirmar'}
           </button>
         </div>
       </form>

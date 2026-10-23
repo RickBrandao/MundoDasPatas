@@ -44,6 +44,15 @@ describe('modo demonstração (GitHub Pages)', () => {
     expect(screen.queryByLabelText('Senha')).toBeNull();
   });
 
+  it('loja pública da demonstração usa os dados fictícios locais, sem chamar a API', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    renderDemo('#/');
+    expect(await screen.findByText('18 produtos')).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it('loja mantém o atalho "Painel (demo)" e o Firebase nunca é carregado', async () => {
     const user = renderDemo('#/');
     await user.click(await screen.findByRole('button', { name: 'Painel (demo)' }));

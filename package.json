@@ -11,7 +11,8 @@
     "lint": "eslint .",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e:emulator": "vitest run --config vitest.e2e.config.ts"
   },
   "dependencies": {
     "firebase": "^12.19.0",

@@ -7,8 +7,9 @@ import { ProductDetailModal } from '../features/catalog/ProductDetailModal';
 import { StorePage } from '../features/catalog/StorePage';
 import type { AdminAccess } from '../services/auth/adminAccess';
 import type { CartStorage } from '../services/cartStorage';
+import type { DataSource } from '../services/dataSource';
 import type { StoreApi } from '../services/storeApi';
-import { AdminAccessContext } from './contexts';
+import { AdminAccessContext, DataSourceContext } from './contexts';
 import { FeedbackProvider } from './FeedbackProvider';
 import { StoreProvider } from './StoreProvider';
 import { UiProvider } from './UiProvider';
@@ -57,13 +58,25 @@ export function AppProviders({ api, cartStorage, children }: { api: StoreApi; ca
   );
 }
 
-export function App({ api, cartStorage, adminAccess }: { api: StoreApi; cartStorage: CartStorage; adminAccess: AdminAccess }) {
+const LOCAL: DataSource = { kind: 'local' };
+
+interface AppProps {
+  api: StoreApi;
+  cartStorage: CartStorage;
+  adminAccess: AdminAccess;
+  /** Origem dos dados do painel; padrão: demonstração local. */
+  dataSource?: DataSource;
+}
+
+export function App({ api, cartStorage, adminAccess, dataSource = LOCAL }: AppProps) {
   return (
     <HashRouter>
       <AdminAccessContext.Provider value={adminAccess}>
-        <AppProviders api={api} cartStorage={cartStorage}>
-          <AppRoutes />
-        </AppProviders>
+        <DataSourceContext.Provider value={dataSource}>
+          <AppProviders api={api} cartStorage={cartStorage}>
+            <AppRoutes />
+          </AppProviders>
+        </DataSourceContext.Provider>
       </AdminAccessContext.Provider>
     </HashRouter>
   );

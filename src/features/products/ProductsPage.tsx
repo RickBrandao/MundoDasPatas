@@ -26,6 +26,8 @@ export function ProductsPage() {
   const confirm = useConfirm();
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  // Uma alteração por vez em cada produto (evita cliques repetidos enquanto o servidor responde).
+  const [busy, setBusy] = useState<string | null>(null);
 
   const test = FILTERS.find((f) => f[0] === filter)![2];
   const nq = normalizeText(q.trim());
@@ -33,7 +35,10 @@ export function ProductsPage() {
   const catName = (id: string) => data.categories.find((c) => c.id === id)?.name ?? '—';
 
   const patch = async (p: Product, flags: Parameters<typeof actions.patchProduct>[1], message: string) => {
+    if (busy) return;
+    setBusy(p.id);
     const r = await actions.patchProduct(p.id, flags);
+    setBusy(null);
     toast(r.ok ? message : r.error);
   };
   const archive = async (p: Product) => {

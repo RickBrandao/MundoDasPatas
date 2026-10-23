@@ -15,9 +15,11 @@ interface Props {
 }
 
 export function ProductFormModal({ product, onClose }: Props) {
-  const { data, actions } = useStore();
+  const { data, actions, source } = useStore();
   const toast = useToast();
   const isNew = !product;
+  // Com a API, fotos dependem do Cloud Storage (etapa futura): sem envio, e data URLs nunca vão ao servidor.
+  const uploadAvailable = source === 'local';
   const [form, setForm] = useState<ProductFormInput>(() =>
     product
       ? {
@@ -83,6 +85,7 @@ export function ProductFormModal({ product, onClose }: Props) {
         return toast('Produto não salvo: sem espaço para a imagem.');
       }
       setErrors(r.fieldErrors ?? {});
+      if (r.fieldErrors?.image) setImgError(r.fieldErrors.image);
       return toast(r.error);
     }
     onClose();
@@ -92,7 +95,8 @@ export function ProductFormModal({ product, onClose }: Props) {
 
   const title = isNew ? 'Novo produto' : 'Editar produto';
   const invalid = (k: string) => ({ 'aria-invalid': !!errors[k], 'aria-describedby': errors[k] ? `pf-${k}-err` : undefined });
-  const preview = form.imageUrl || artFor({ id: form.id ?? '', categoryId: form.categoryId });
+  const keptImage = uploadAvailable || form.imageUrl.startsWith('https://') ? form.imageUrl : '';
+  const preview = keptImage || artFor({ id: form.id ?? '', categoryId: form.categoryId });
 
   return (
     <Modal label={title} onClose={onClose} className="dialog pf-dialog">
@@ -115,6 +119,11 @@ export function ProductFormModal({ product, onClose }: Props) {
         <Field label="Nome do produto *" full error={errors.name} errorId="pf-name-err">
           <input className="input" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Ex.: Ração Adulto 15 kg" {...invalid('name')} />
         </Field>
+        {data.categories.length === 0 && (
+          <p className="notice notice--warn field--full" role="note" style={{ margin: 0 }}>
+            Nenhuma categoria cadastrada. Cadastre a primeira categoria em <strong>Categorias</strong> antes de salvar o produto.
+          </p>
+        )}
         <Field label="Categoria *" error={errors.categoryId} errorId="pf-categoryId-err">
           <select className="select" value={form.categoryId} onChange={(e) => set('categoryId', e.target.value)} {...invalid('categoryId')}>
             <option value="">Selecione</option>
@@ -141,20 +150,28 @@ export function ProductFormModal({ product, onClose }: Props) {
           <div className="pf-image__controls">
             <span style={{ fontSize: 14, fontWeight: 700 }}>Imagem do produto</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              <label className="btn btn--secondary pf-image__pick">
-                <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(e) => onFile(e.currentTarget)} />
-                <Icon name="upload" />
-                Escolher imagem
-              </label>
-              {form.imageUrl && (
+              {uploadAvailable && (
+                <label className="btn btn--secondary pf-image__pick">
+                  <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(e) => onFile(e.currentTarget)} />
+                  <Icon name="upload" />
+                  Escolher imagem
+                </label>
+              )}
+              {keptImage && (
                 <button type="button" className="btn btn--danger" onClick={() => set('imageUrl', '')}>
                   Remover
                 </button>
               )}
             </div>
-            <span className="field-hint" style={{ fontWeight: 400 }}>
-              JPEG, PNG ou WebP até 8 MB (reduzida para 600 px). Sem foto, o catálogo usa a ilustração demonstrativa.
-            </span>
+            {uploadAvailable ? (
+              <span className="field-hint" style={{ fontWeight: 400 }}>
+                JPEG, PNG ou WebP até 8 MB (reduzida para 600 px). Sem foto, o catálogo usa a ilustração demonstrativa.
+              </span>
+            ) : (
+              <span className="field-hint" style={{ fontWeight: 400 }}>
+                O envio de fotos ainda não está disponível nesta versão. O produto pode ser salvo normalmente e usa a ilustração padrão da categoria até lá.
+              </span>
+            )}
             {imgError && (
               <span role="alert" className="field-error">
                 {imgError}
