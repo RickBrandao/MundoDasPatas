@@ -168,6 +168,28 @@ describe('fim da sessão administrativa com operações pendentes', () => {
     expect(backend.db.products.find((p) => p.id === product.id)!.stock).toBe(4);
   });
 
+  it('B2 — logout com cabeçalhos recebidos e corpo pendente: leitura cancelada, sem sucesso tardio', async () => {
+    const { backend, product, user } = setup();
+    expect(await heading('Vendas')).toBeInTheDocument();
+    const held = backend.hold('POST', '/api/v1/admin/sales', { apply: 'body' });
+    await startSale(user, product.id);
+    await held.arrived; // venda gravada, cabeçalhos entregues, corpo em leitura
+    expect(backend.db.sales).toHaveLength(1);
+    expect(held.signal?.aborted).toBe(false);
+
+    await logout(user);
+    expect(held.signal?.aborted).toBe(true);
+    const before = backend.calls.length;
+    await act(async () => held.release());
+    await pause(50);
+    expect(screen.queryByText(/registrada\. Estoque atualizado/)).toBeNull();
+    expect(callsAfter(backend, before).filter((c) => c.path.startsWith('/api/v1/admin/'))).toHaveLength(0);
+    expect(screen.getByRole('heading', { level: 1, name: 'Entrar' })).toBeInTheDocument();
+    // Sem rollback: a venda gravada continua no servidor.
+    expect(backend.calls.filter((c) => c.path.endsWith('/cancel'))).toHaveLength(0);
+    expect(backend.db.sales).toHaveLength(1);
+  });
+
   it('G — demonstração continua local, sem login nem chamadas HTTP', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

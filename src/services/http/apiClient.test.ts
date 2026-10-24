@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { json } from '../../test/fakeAuth';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { deferred, json } from '../../test/fakeAuth';
 import { ApiRequestError, asFailure, failureMessage, fieldMessage, outcomeUnknown, requestJson, retryableWithSameKey, type Send } from './apiClient';
 
 const sendOnce = (r: Response | Error): Send => vi.fn(async () => {
@@ -106,5 +106,154 @@ describe('requestJson', () => {
     expect(retryableWithSameKey({ kind: 'http', status: 409, code: 'conflict', serverMessage: null })).toBe(false);
     expect(retryableWithSameKey({ kind: 'http', status: 422, code: 'validation_error', serverMessage: null })).toBe(false);
     expect(retryableWithSameKey({ kind: 'http', status: 503, code: 'database_busy', serverMessage: null })).toBe(true);
+  });
+});
+
+/**
+ * TASK 06F.1 (P1): tempo limite e cancelamento valem também depois dos cabeçalhos, durante a leitura
+ * do corpo. Os corpos retidos ignoram o sinal (pior caso: transporte que não cancela a leitura).
+ */
+describe('requestJson — cancelamento durante a leitura do corpo', () => {
+  afterEach(() => vi.useRealTimers());
+
+  /** Cabeçalhos imediatos; `json()` só termina quando `release()` é chamado. */
+  function slowBody(response: Response) {
+    const body = deferred<void>();
+    const read = response.json.bind(response);
+    const reading = vi.fn(async () => {
+      await body.promise;
+      return read();
+    });
+    Object.defineProperty(response, 'json', { value: reading });
+    const send = vi.fn<Send>(async () => response);
+    return { send, reading, release: () => body.resolve() };
+  }
+
+  /** Espiona os listeners do sinal externo para provar que ficam ativos até o fim e depois saem. */
+  function trackedSignal() {
+    const controller = new AbortController();
+    const add = vi.spyOn(controller.signal, 'addEventListener');
+    const remove = vi.spyOn(controller.signal, 'removeEventListener');
+    return { controller, add, remove };
+  }
+
+  const settle = (p: Promise<unknown>) => {
+    const state = { resolved: vi.fn(), rejected: vi.fn() };
+    p.then(state.resolved, state.rejected);
+    return state;
+  };
+
+  it('A — logout com o corpo pendente: transporte abortado, rejeição imediata e sem sucesso tardio', async () => {
+    const { send, reading, release } = slowBody(json(201, { id: 'venda' }));
+    const { controller, remove } = trackedSignal();
+    const pending = requestJson(send, '/x', { method: 'POST', body: {}, signal: controller.signal });
+    const state = settle(pending);
+    await vi.waitFor(() => expect(reading).toHaveBeenCalled());
+    // Cabeçalhos recebidos e corpo em leitura: o listener da sessão ainda está ativo.
+    expect(remove).not.toHaveBeenCalled();
+
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ failure: { kind: 'aborted' } });
+    expect(send.mock.calls[0][1].signal!.aborted).toBe(true);
+    expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+
+    release(); // o corpo chega depois do logout
+    await new Promise((r) => setTimeout(r, 0));
+    expect(state.resolved).not.toHaveBeenCalled();
+    expect(state.rejected).toHaveBeenCalledTimes(1);
+  });
+
+  it('B — tempo limite durante a leitura do corpo: timeout, e o corpo tardio não vira sucesso', async () => {
+    vi.useFakeTimers();
+    const response = json(200, { id: 'a' });
+    const read = response.json.bind(response);
+    Object.defineProperty(response, 'json', { value: () => new Promise((r) => setTimeout(() => r(read()), 50)) });
+    const send = vi.fn<Send>(async () => response);
+    const pending = requestJson(send, '/x', { timeoutMs: 20 });
+    const state = settle(pending);
+
+    await vi.advanceTimersByTimeAsync(19);
+    expect(state.rejected).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(state.rejected).toHaveBeenCalledWith(expect.objectContaining({ failure: { kind: 'timeout' } }));
+    expect(send.mock.calls[0][1].signal!.aborted).toBe(true);
+    expect(outcomeUnknown({ kind: 'timeout' })).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(30); // corpo entregue aos 50 ms
+    expect(state.resolved).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('C — cabeçalhos e corpo dentro do prazo: sucesso, sem timer nem listener pendentes', async () => {
+    vi.useFakeTimers();
+    const { send, release } = slowBody(json(200, { id: 'a' }));
+    const { controller, add, remove } = trackedSignal();
+    const pending = requestJson(send, '/x', { timeoutMs: 20, signal: controller.signal });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(vi.getTimerCount()).toBe(1); // o tempo limite segue ativo durante a leitura do corpo
+    expect(remove).not.toHaveBeenCalled();
+    release();
+    await expect(pending).resolves.toEqual({ id: 'a' });
+    expect(vi.getTimerCount()).toBe(0);
+    expect(remove.mock.calls).toEqual(add.mock.calls.map(([type, listener]) => [type, listener]));
+    expect(send.mock.calls[0][1].signal!.aborted).toBe(false);
+  });
+
+  it.each([
+    [409, { error: { code: 'insufficient_stock', message: 'Estoque insuficiente.' } }, undefined],
+    [
+      422,
+      { error: { code: 'validation_error', message: 'Revise os campos destacados.', fieldErrors: { qty: 'Input should be greater than 0' } } },
+      { qty: 'Valor inválido.' },
+    ],
+  ])('D — HTTP %i com corpo lento dentro do prazo preserva o erro e os fieldErrors', async (status, body, fieldErrors) => {
+    vi.useFakeTimers();
+    const { send, release } = slowBody(json(status, body));
+    const pending = failureOf(send, { timeoutMs: 20 });
+    await vi.advanceTimersByTimeAsync(10);
+    release();
+    const f = await pending;
+    expect(f).toMatchObject({ kind: 'http', status, code: body.error.code, serverMessage: body.error.message });
+    expect(f.kind === 'http' ? f.fieldErrors : null).toEqual(fieldErrors);
+    expect(retryableWithSameKey(f)).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('E — corpo inválido dentro do prazo é invalid-response, não timeout', async () => {
+    vi.useFakeTimers();
+    const { send, release } = slowBody(new Response('{"id":', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const pending = failureOf(send, { timeoutMs: 20 });
+    await vi.advanceTimersByTimeAsync(10);
+    release();
+    expect(await pending).toEqual({ kind: 'invalid-response' });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('conexão interrompida no meio do corpo de um 2xx é falha de rede (resultado desconhecido)', async () => {
+    const response = json(201, { id: 'a' });
+    Object.defineProperty(response, 'json', { value: () => Promise.reject(new TypeError('terminated')) });
+    const f = await failureOf(vi.fn<Send>(async () => response));
+    expect(f).toEqual({ kind: 'network' });
+    expect(outcomeUnknown(f)).toBe(true);
+  });
+
+  it('F — sinal já abortado: nenhuma requisição é enviada e nenhum timer é criado', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    controller.abort();
+    const send = vi.fn<Send>();
+    expect(await failureOf(send, { signal: controller.signal })).toEqual({ kind: 'aborted' });
+    expect(send).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('transporte que ignora o sinal: o logout rejeita mesmo com o fetch ainda pendente', async () => {
+    const controller = new AbortController();
+    const never = deferred<Response>();
+    const pending = failureOf(vi.fn<Send>(() => never.promise), { signal: controller.signal });
+    controller.abort();
+    expect(await pending).toEqual({ kind: 'aborted' });
+    never.resolve(json(200, { id: 'tarde' }));
   });
 });

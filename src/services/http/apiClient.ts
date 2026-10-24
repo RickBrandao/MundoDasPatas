@@ -40,11 +40,16 @@ export interface JsonRequest {
   signal?: AbortSignal;
 }
 
-/** Envia e devolve o corpo JSON de uma resposta 2xx; qualquer outra situação vira `ApiRequestError`. */
+/**
+ * Envia e devolve o corpo JSON de uma resposta 2xx; qualquer outra situação vira `ApiRequestError`.
+ *
+ * O tempo limite e o cancelamento valem para a operação inteira (token, envio, cabeçalhos e leitura
+ * do corpo): timer e listener só são liberados no `finally`, depois de consumido o corpo.
+ */
 export async function requestJson(send: Send, path: string, req: JsonRequest = {}): Promise<unknown> {
   // Sessão já encerrada (ou chamada cancelada): nada é enviado.
   if (req.signal?.aborted) throw new ApiRequestError({ kind: 'aborted' });
-  // Controlador local só para o tempo limite; ele segue o sinal de quem chamou (não o substitui).
+  // Controlador local para o tempo limite; ele segue o sinal de quem chamou (não o substitui).
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -53,37 +58,61 @@ export async function requestJson(send: Send, path: string, req: JsonRequest = {
   }, req.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const onAbort = () => controller.abort();
   req.signal?.addEventListener('abort', onAbort);
+  // Rejeita assim que o controlador aborta, mesmo que o transporte (ou o corpo) ignore o sinal.
+  let onCancel = () => {};
+  const cancelled = new Promise<never>((_, reject) => {
+    onCancel = () => reject(new DOMException('The operation was aborted.', 'AbortError'));
+    controller.signal.addEventListener('abort', onCancel, { once: true });
+  });
+  cancelled.catch(() => {}); // só é observada pelas corridas abaixo
+  const cancellation = (): ApiFailure | null => (timedOut ? { kind: 'timeout' } : req.signal?.aborted ? { kind: 'aborted' } : null);
+  const throwIfCancelled = () => {
+    const failure = cancellation();
+    if (failure) throw new ApiRequestError(failure);
+  };
 
   const headers: Record<string, string> = { Accept: 'application/json', ...req.headers };
   if (req.body !== undefined) headers['Content-Type'] = 'application/json';
 
-  let response: Response;
   try {
-    response = await send(path, {
-      method: req.method ?? 'GET',
-      headers,
-      body: req.body === undefined ? undefined : JSON.stringify(req.body),
-      signal: controller.signal,
-    });
-  } catch (error) {
-    throw new ApiRequestError(sendFailure(error, timedOut, req.signal));
+    let response: Response;
+    try {
+      response = await Promise.race([
+        send(path, {
+          method: req.method ?? 'GET',
+          headers,
+          body: req.body === undefined ? undefined : JSON.stringify(req.body),
+          signal: controller.signal,
+        }),
+        cancelled,
+      ]);
+    } catch (error) {
+      throw new ApiRequestError(cancellation() ?? sendFailure(error));
+    }
+    // Resposta que chegou depois do cancelamento (ex.: logout): descartada sem ser interpretada.
+    throwIfCancelled();
+
+    let body: unknown;
+    try {
+      body = await Promise.race([response.json(), cancelled]);
+    } catch (error) {
+      throwIfCancelled();
+      // Conexão interrompida no meio do corpo de um 2xx: a escrita pode ter sido aplicada.
+      if (response.ok && !(error instanceof SyntaxError)) throw new ApiRequestError({ kind: 'network' });
+      body = undefined;
+    }
+    throwIfCancelled();
+    if (!response.ok) throw new ApiRequestError(httpFailure(response.status, body));
+    if (body === undefined) throw new ApiRequestError({ kind: 'invalid-response' });
+    return body;
   } finally {
     clearTimeout(timer);
     req.signal?.removeEventListener('abort', onAbort);
+    controller.signal.removeEventListener('abort', onCancel);
   }
-
-  // Resposta que chegou depois do cancelamento (ex.: logout): descartada sem ser interpretada.
-  if (req.signal?.aborted) throw new ApiRequestError({ kind: 'aborted' });
-  const body: unknown = await response.json().catch(() => undefined);
-  if (req.signal?.aborted) throw new ApiRequestError({ kind: 'aborted' });
-  if (!response.ok) throw new ApiRequestError(httpFailure(response.status, body));
-  if (body === undefined) throw new ApiRequestError({ kind: 'invalid-response' });
-  return body;
 }
 
-function sendFailure(error: unknown, timedOut: boolean, signal?: AbortSignal): ApiFailure {
-  if (timedOut) return { kind: 'timeout' };
-  if (signal?.aborted) return { kind: 'aborted' };
+function sendFailure(error: unknown): ApiFailure {
   // Falha ao obter o token do Firebase: sessão encerrada (401) ou rede.
   const code = authErrorCode(error);
   if (code === 'auth/network-request-failed') return { kind: 'network' };

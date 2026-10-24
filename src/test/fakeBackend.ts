@@ -76,11 +76,12 @@ type Failure = Response | 'network';
 
 /**
  * Requisição retida até `release()`. `apply: 'before'` = o servidor ainda não processou (retida na rede, na ida);
- * `'after'` = já gravou e a resposta está retida (na volta). Com `ignoreAbort`, a resposta chega mesmo depois de
- * o navegador abortar (simula uma resposta tardia que o cliente precisa descartar sozinho).
+ * `'after'` = já gravou e a resposta está retida (na volta); `'body'` = já gravou, os cabeçalhos chegaram e o
+ * corpo JSON fica retido (a leitura ignora o sinal, como um transporte que não cancela o corpo). Com `ignoreAbort`,
+ * a resposta chega mesmo depois de o navegador abortar (simula uma resposta tardia que o cliente precisa descartar sozinho).
  */
 export interface Hold {
-  apply: 'before' | 'after';
+  apply: 'before' | 'after' | 'body';
   ignoreAbort?: boolean;
   /** Preenchido quando a requisição chega. */
   signal?: AbortSignal;
@@ -335,6 +336,17 @@ export function createFakeBackend(options: { me?: Handler } = {}) {
     const response = await route(method, path, token, headers.get('Idempotency-Key'), body);
     if (hold?.apply === 'after') await wait();
     if (take(lost, method, path)) throw new TypeError('Failed to fetch');
+    if (hold?.apply === 'body') {
+      const read = response.json.bind(response);
+      hold.signal = init.signal ?? undefined;
+      Object.defineProperty(response, 'json', {
+        value: async () => {
+          (hold as unknown as { markArrived: () => void }).markArrived();
+          await hold.gate;
+          return read();
+        },
+      });
+    }
     return response;
   });
 
@@ -354,7 +366,7 @@ export function createFakeBackend(options: { me?: Handler } = {}) {
       failures.push({ method, path, failure });
     },
     /** Retém a próxima requisição (ver `Hold`). */
-    hold(method: string, path: string, options: { apply: 'before' | 'after'; ignoreAbort?: boolean }) {
+    hold(method: string, path: string, options: { apply: Hold['apply']; ignoreAbort?: boolean }) {
       let release!: () => void;
       let markArrived!: () => void;
       const gate = new Promise<void>((r) => (release = r));
