@@ -88,7 +88,9 @@ class ProductImageService:
         self._tokens = tokens
 
     def _require_store(self) -> ObjectStore:
-        if self._store is None:
+        # Configuração conferida antes de ler o produto ou abrir transação: com bucket, projeto ou
+        # credencial recusados, nada é gravado no Storage nem no Firestore.
+        if self._store is None or not self._store.ready():
             raise StorageNotConfigured()
         return self._store
 
@@ -155,6 +157,8 @@ class ProductImageService:
     # ------------------------------------------------------------- remoção
 
     def remove(self, product_id: str) -> Product:
+        if self._store is not None:
+            self._require_store()  # Storage desligado (None) ainda permite desvincular; recusado, não.
         now = self._clock()
 
         def write(tx: InventoryTransaction) -> tuple[Product, Product]:

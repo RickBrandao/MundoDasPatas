@@ -442,7 +442,7 @@ def test_storage_connection_failure_is_503_quickly(repos: Repositories, seeded: 
         firebase_project_id="demo-test",
         admin_allowed_uids="admin-uid-1",
         image_storage="firebase",
-        firebase_storage_bucket="demo-test.appspot.com",
+        firebase_storage_bucket="demo-test.firebasestorage.app",
         firebase_storage_emulator_host="127.0.0.1:9",
     )
     app = create_app(settings, repos)
@@ -483,7 +483,7 @@ def storage_settings(**over: Any) -> Any:
     base: dict[str, Any] = {
         "firebase_project_id": "demo-test",
         "image_storage": "firebase",
-        "firebase_storage_bucket": "demo-test.appspot.com",
+        "firebase_storage_bucket": "demo-test.firebasestorage.app",
     }
     return make_settings(**(base | over))
 
@@ -521,7 +521,7 @@ def test_valid_storage_modes() -> None:
 def test_public_urls_point_to_firebase_download_endpoint() -> None:
     real = FirebaseObjectStore(storage_settings(data_backend="firestore"))
     assert real.public_url("products/p1/images/x.webp", "tok") == (
-        "https://firebasestorage.googleapis.com/v0/b/demo-test.appspot.com/o/products%2Fp1%2Fimages%2Fx.webp?alt=media&token=tok"
+        "https://firebasestorage.googleapis.com/v0/b/demo-test.firebasestorage.app/o/products%2Fp1%2Fimages%2Fx.webp?alt=media&token=tok"
     )
     emu = FirebaseObjectStore(storage_settings(firebase_storage_emulator_host="127.0.0.1:9199"))
     assert emu.public_url("products/p1/images/x.webp", "tok").startswith("http://127.0.0.1:9199/v0/b/")
@@ -541,7 +541,7 @@ def test_deployed_environments_refuse_storage_emulator_and_missing_bucket(env: s
         make_settings(
             **deployed,
             image_storage="firebase",
-            firebase_storage_bucket="b.appspot.com",
+            firebase_storage_bucket="real.firebasestorage.app",
             firebase_storage_emulator_host="127.0.0.1:9199",
         )
     with pytest.raises(ValidationError, match="FIREBASE_STORAGE_BUCKET"):
@@ -582,7 +582,7 @@ def test_cleanup_script_refuses_unconfigured_storage_and_unconfirmed_apply(
     assert storage_cleanup.main([]) == 2
     monkeypatch.setenv("IMAGE_STORAGE", "firebase")
     monkeypatch.setenv("FIREBASE_PROJECT_ID", "demo-test")
-    monkeypatch.setenv("FIREBASE_STORAGE_BUCKET", "demo-test.appspot.com")
+    monkeypatch.setenv("FIREBASE_STORAGE_BUCKET", "demo-test.firebasestorage.app")
     monkeypatch.setenv("FIREBASE_STORAGE_EMULATOR_HOST", "127.0.0.1:9")
     assert storage_cleanup.main(["--apply", "--confirm-bucket", "outro-bucket"]) == 2
     assert "Nada foi excluído" in capsys.readouterr().out

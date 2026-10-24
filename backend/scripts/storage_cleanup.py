@@ -3,6 +3,10 @@
     python -m scripts.storage_cleanup                                     # SIMULAÇÃO (padrão): só relata
     python -m scripts.storage_cleanup --apply --confirm-bucket <BUCKET>   # exclui
 
+Recusa (sem criar cliente nem excluir nada) bucket que não seja o padrão do projeto
+(`<FIREBASE_PROJECT_ID>.firebasestorage.app`) e credencial de outro projeto — `--confirm-bucket` não
+contorna essas regras.
+
 Só considera objetos `products/{productId}/images/{imageId}.webp` com metadado `productId` igual ao
 do caminho, que não são a foto atual do produto (lida no Firestore) e criados há mais de 1 hora
 (envios em andamento ficam de fora). Qualquer outro objeto do bucket é ignorado. Ver docs/storage.md.
@@ -33,7 +37,9 @@ def main(argv: list[str] | None = None) -> int:
     except ApiError:
         print("Storage não configurado ou combinação de ambientes recusada (ver docs/storage.md). Nada foi feito.")
         return 2
-    print(f"Bucket: {settings.firebase_storage_bucket} ({'EMULADOR' if mode == 'emulator' else 'STORAGE REAL'})")
+    # Daqui em diante projeto, bucket e credencial já foram conferidos (bucket padrão do próprio projeto).
+    where = "EMULADOR" if mode == "emulator" else "STORAGE REAL"
+    print(f"Projeto: {settings.firebase_project_id}  Bucket: {settings.firebase_storage_bucket} ({where})")
     if args.apply and args.confirm_bucket != settings.firebase_storage_bucket:
         print("--apply recusado: --confirm-bucket precisa ser exatamente o bucket acima. Nada foi excluído.")
         return 2

@@ -41,6 +41,27 @@ def _split_csv(value: object) -> object:
     return value
 
 
+# Único bucket aceito para as fotos: o padrão do próprio projeto (projeto novo, sem bucket legado
+# `.appspot.com`). Impede gravar, listar ou apagar em bucket de outro projeto por engano de configuração.
+DEFAULT_BUCKET_SUFFIX = ".firebasestorage.app"
+
+
+def expected_storage_bucket(project_id: str | None) -> str | None:
+    return f"{project_id}{DEFAULT_BUCKET_SUFFIX}" if project_id else None
+
+
+def service_account_project(raw: str) -> str | None:
+    """`project_id` de uma conta de serviço em JSON (None se não for uma). Nunca registra o conteúdo."""
+    try:
+        info = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(info, dict) or info.get("type") != "service_account":
+        return None
+    project = info.get("project_id")
+    return project if isinstance(project, str) and project else None
+
+
 def _is_service_account(raw: str) -> bool:
     try:
         info = json.loads(raw)
@@ -142,10 +163,21 @@ class Settings(BaseSettings):
                 "FIREBASE_SERVICE_ACCOUNT_JSON não é uma conta de serviço válida "
                 "(objeto JSON com type=service_account, project_id, client_email e private_key)."
             )
+        elif (
+            self.firebase_service_account_json is not None
+            and service_account_project(self.firebase_service_account_json.get_secret_value()) != self.firebase_project_id
+        ):
+            problems.append("FIREBASE_SERVICE_ACCOUNT_JSON pertence a outro projeto (project_id ≠ FIREBASE_PROJECT_ID).")
         if self.firebase_storage_emulator_host:
             problems.append("FIREBASE_STORAGE_EMULATOR_HOST não pode estar definido (as fotos iriam para o emulador local).")
         if self.image_storage is ImageStorage.FIREBASE and not self.firebase_storage_bucket:
             problems.append("IMAGE_STORAGE=firebase exige FIREBASE_STORAGE_BUCKET.")
+        elif self.image_storage is ImageStorage.FIREBASE and self.firebase_storage_bucket != expected_storage_bucket(
+            self.firebase_project_id
+        ):
+            problems.append(
+                "FIREBASE_STORAGE_BUCKET precisa ser o bucket padrão do projeto (<FIREBASE_PROJECT_ID>.firebasestorage.app)."
+            )
         if "*" in self.cors_origins:
             problems.append("CORS_ORIGINS não pode conter '*'.")
         if self.app_env is AppEnv.PRODUCTION and any(o.startswith("http://") for o in self.cors_origins):

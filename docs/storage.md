@@ -66,7 +66,7 @@ Variáveis do backend (`backend/.env.example`):
 | Variável | Valores |
 | --- | --- |
 | `IMAGE_STORAGE` | `disabled` (padrão) ou `firebase` |
-| `FIREBASE_STORAGE_BUCKET` | nome do bucket, sem `gs://` (ex.: `mundo-das-patas---dev.firebasestorage.app`) |
+| `FIREBASE_STORAGE_BUCKET` | **exatamente** `<FIREBASE_PROJECT_ID>.firebasestorage.app` (ex.: `mundo-das-patas---dev.firebasestorage.app`) |
 | `FIREBASE_STORAGE_EMULATOR_HOST` | `127.0.0.1:9199` — **só** com o emulador; proibido em staging/produção |
 
 Combinações recusadas (fail-closed, `503`, em qualquer `APP_ENV`):
@@ -76,6 +76,24 @@ Combinações recusadas (fail-closed, `503`, em qualquer `APP_ENV`):
 - Storage real com a variável `STORAGE_EMULATOR_HOST` no ambiente (a biblioteca desviaria as chamadas);
 - staging/produção com `FIREBASE_STORAGE_EMULATOR_HOST`, ou com `IMAGE_STORAGE=firebase` sem bucket
   (a aplicação nem inicia).
+
+### Isolamento entre projetos (TASK 07B.1)
+
+Conferido em `check_storage_config` antes de criar o cliente, antes de ler o produto ou abrir
+transação (envio, troca, remoção, limpeza) e de novo antes de cada operação no bucket:
+
+- **Bucket:** só o padrão do próprio projeto, `<FIREBASE_PROJECT_ID>.firebasestorage.app` — também no
+  emulador (`demo-…firebasestorage.app`). Bucket de outro projeto, legado `.appspot.com` (o projeto
+  não tem), sufixos ou prefixos extras: `503` e nada é gravado no Storage nem no Firestore.
+  O nome nunca vem da requisição.
+- **`FIREBASE_SERVICE_ACCOUNT_JSON`:** `project_id` igual a `FIREBASE_PROJECT_ID`, senão o Storage real
+  é recusado (e staging/produção nem iniciam). O conteúdo nunca é registrado.
+- **ADC:** se `GOOGLE_APPLICATION_CREDENTIALS` apontar para uma conta de serviço, o `project_id` dela
+  precisa ser o do projeto; arquivo ilegível é recusado. ADC de usuário (`gcloud auth application-default
+  login`, tipo `authorized_user`) **não identifica projeto**: é aceito, e `quota_project_id` é ignorado
+  (é só o projeto de cota/cobrança, não prova de posse). Também não identificam projeto offline:
+  `impersonated_service_account`, `external_account` e o servidor de metadados. Nesses casos, a barreira
+  é o nome do bucket mais o IAM, e a posse é conferida na ativação (§7).
 
 `GET /health` informa `storage.status` = `disabled`, `emulator`, `configured` ou `not_configured`,
 sem testar a conexão.
@@ -157,7 +175,16 @@ Nada disto foi feito na TASK 07A. Todas as etapas são do proprietário da conta
    do Admin SDK já tem; para conta dedicada, `Storage Object Admin` restrito ao bucket).
 5. **Backend:** `IMAGE_STORAGE=firebase`, `FIREBASE_STORAGE_BUCKET=mundo-das-patas---dev.firebasestorage.app`,
    com `DATA_BACKEND=firestore` real e **sem** `FIREBASE_STORAGE_EMULATOR_HOST`/`STORAGE_EMULATOR_HOST`.
-6. **Validar:** `GET /health` → `storage: configured`; enviar uma foto pelo painel; abrir a vitrine
+6. **Conferir a posse do bucket** (somente leitura, antes do primeiro envio; não é feito pela API em
+   tempo de execução porque exigiria `storage.buckets.get`, permissão que a conta de serviço de
+   objetos não precisa ter):
+   ```powershell
+   gcloud storage buckets describe gs://mundo-das-patas---dev.firebasestorage.app --format="value(project_number)"
+   gcloud projects describe mundo-das-patas---dev --format="value(projectNumber)"   # os dois iguais
+   ```
+   No Console do Firebase (Storage) o bucket aparece como **padrão** do projeto; e
+   `gcloud storage buckets get-iam-policy gs://…` deve mostrar a identidade do backend só com acesso a objetos.
+7. **Validar:** `GET /health` → `storage: configured`; enviar uma foto pelo painel; abrir a vitrine
    sem login; trocar e remover; rodar `python -m scripts.storage_cleanup` (simulação).
 
 CORS do bucket não é necessário: as fotos são exibidas por `<img>` e o envio passa pelo FastAPI.

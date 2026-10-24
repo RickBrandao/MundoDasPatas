@@ -31,7 +31,7 @@ from app.storage.firebase import FirebaseObjectStore
 from tests.conftest import ADMIN, NOW, build_client, category, default_verifier, make_settings, product
 from tests_emulator.conftest import EMULATOR_PROJECT, LOOPBACK, put_docs
 
-BUCKET = f"{EMULATOR_PROJECT}.appspot.com"
+BUCKET = f"{EMULATOR_PROJECT}.firebasestorage.app"
 
 
 def _request(method: str, url: str, data: bytes | None = None, headers: dict[str, str] | None = None) -> tuple[int, bytes, Any]:
@@ -200,3 +200,54 @@ def test_products_written_before_storage_support_still_load(db: Any, repos: Repo
     db.collection("products").document("antigo").set(doc)
     p = repos.products.get("antigo")
     assert p is not None and p.image_path == ""
+
+
+def test_concurrent_replacements_and_removal_stay_consistent(
+    repos: Repositories, store: FirebaseObjectStore, seeded: None
+) -> None:
+    """P3 da auditoria da TASK 07A: duas trocas e uma remoção simultâneas no mesmo produto, com outro
+    produto tendo foto própria. A lógica transacional não muda; o teste trava o comportamento."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.core.errors import ApiError
+
+    service = ProductImageService(repos, store)
+    service.upload("p2", jpeg((0, 200, 0)), "image/jpeg")
+    other = stored_path(repos, "p2")
+    for round_ in range(3):
+        service.upload("p1", jpeg((round_ * 40, 0, 0)), "image/jpeg")  # foto inicial a ser trocada
+        ops = [
+            lambda: service.upload("p1", jpeg((200, 0, 0)), "image/jpeg"),
+            lambda: service.upload("p1", jpeg((0, 0, 200)), "image/jpeg"),
+            lambda: service.remove("p1"),
+        ]
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = [pool.submit(op) for op in ops]
+        errors = [f.exception() for f in futures if f.exception() is not None]
+        # Disputa só pode aparecer como erro de API explícito (ex.: 503 database_busy), nunca escondida.
+        assert all(isinstance(e, ApiError) for e in errors), errors
+        assert len(errors) < len(ops)
+
+        current = stored_path(repos, "p1")
+        objects = names(store)
+        # Referência coerente: sem foto, ou apontando para um objeto que existe e é do próprio produto.
+        assert current == "" or (current in objects and current.startswith("products/p1/images/"))
+        product_p1 = repos.products.get("p1")
+        assert product_p1 is not None and bool(product_p1.image_url) == bool(current)
+        # Sem exclusão cruzada: a foto do outro produto continua lá e continua sendo a dele.
+        assert other in objects and stored_path(repos, "p2") == other
+        assert _request("GET", store.public_url(other, _token(store, other)))[0] == 200
+
+        # Objetos intermediários não referenciados são exatamente os que a limpeza identifica.
+        extras = {p for p in objects if p.startswith("products/p1/")} - {current}
+        report = service.cleanup_orphans(product_id="p1", dry_run=True, grace=timedelta(0))
+        assert set(report.deleted) == extras
+        service.cleanup_orphans(product_id="p1", dry_run=False, grace=timedelta(0))
+        assert names(store) == {other} | ({current} if current else set())
+
+
+def _token(store: FirebaseObjectStore, path: str) -> str:
+    from app.storage.firebase import TOKEN_METADATA
+
+    (obj,) = [o for o in store.list(path) if o.path == path]
+    return obj.metadata[TOKEN_METADATA]

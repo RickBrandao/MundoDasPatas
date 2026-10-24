@@ -71,9 +71,15 @@ class FirebaseObjectStore:
         self._settings = settings
         self._bucket = bucket or LazyBucket(settings)
 
+    def _checked_bucket(self) -> "Bucket":
+        # Confere projeto, bucket e credenciais antes de cada operação, mesmo com o bucket já criado
+        # ou injetado: nenhuma referência a objeto nasce com configuração recusada.
+        check_storage_config(self._settings)
+        return self._bucket()
+
     def put(self, path: str, data: bytes, *, content_type: str, cache_control: str, metadata: dict[str, str]) -> None:
         with _translate_errors():
-            blob = self._bucket().blob(path)
+            blob = self._checked_bucket().blob(path)
             blob.cache_control = cache_control
             blob.metadata = metadata
             # Repetir é seguro: o caminho é inédito, então uma repetição só regrava o mesmo conteúdo.
@@ -84,14 +90,14 @@ class FirebaseObjectStore:
 
         with _translate_errors():
             try:
-                self._bucket().blob(path).delete(timeout=REQUEST_TIMEOUT, retry=_retry())
+                self._checked_bucket().blob(path).delete(timeout=REQUEST_TIMEOUT, retry=_retry())
             except gexc.NotFound:
                 return False
             return True
 
     def list(self, prefix: str) -> list[StoredObject]:
         with _translate_errors():
-            bucket = self._bucket()
+            bucket = self._checked_bucket()
             return [
                 StoredObject(
                     path=b.name,

@@ -11,14 +11,24 @@ Combinações que misturariam ambientes são recusadas (fail-closed), em qualque
 - Storage Emulator só com dados efêmeros ou no Firestore Emulator (URLs do emulador nunca vão para o banco real);
 - Storage real só com o Firestore real (objetos reais nunca ficam apontados por dados descartáveis);
 - `STORAGE_EMULATOR_HOST` no ambiente com o Storage real (a biblioteca desviaria as chamadas).
+
+Isolamento entre projetos (TASK 07B.1), conferido antes de criar o cliente e antes de cada operação:
+- o bucket precisa ser o padrão do próprio projeto, `<FIREBASE_PROJECT_ID>.firebasestorage.app`
+  (também no emulador, com o projeto `demo-*`); `.appspot.com` legado não é aceito;
+- Storage real: a credencial que identifica um projeto precisa ser do mesmo projeto —
+  `FIREBASE_SERVICE_ACCOUNT_JSON` ou um arquivo de conta de serviço em `GOOGLE_APPLICATION_CREDENTIALS`.
+  ADC de usuário (`authorized_user`) não identifica projeto: é aceito, e `quota_project_id` (projeto de
+  cota, não de propriedade) é ignorado. A posse real do bucket é conferida na ativação (docs/storage.md §7).
 """
 
+import json
 import logging
 import os
 import threading
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from app.core.config import DataBackend, ImageStorage, Settings
+from app.core.config import DataBackend, ImageStorage, Settings, expected_storage_bucket, service_account_project
 from app.core.errors import ServiceUnavailable
 
 if TYPE_CHECKING:
@@ -54,6 +64,8 @@ def check_storage_config(settings: Settings, *, log: bool = True) -> str:
         problem = "IMAGE_STORAGE=disabled"
     elif not settings.firebase_storage_bucket or not settings.firebase_project_id:
         problem = "IMAGE_STORAGE=firebase exige FIREBASE_STORAGE_BUCKET e FIREBASE_PROJECT_ID"
+    elif settings.firebase_storage_bucket != expected_storage_bucket(settings.firebase_project_id):
+        problem = "FIREBASE_STORAGE_BUCKET não é o bucket padrão de FIREBASE_PROJECT_ID (<projeto>.firebasestorage.app)"
     elif mode == "emulator":
         if settings.is_deployed:
             problem = "Storage Emulator em ambiente publicado"
@@ -64,11 +76,34 @@ def check_storage_config(settings: Settings, *, log: bool = True) -> str:
             problem = "Storage real exige o Firestore real"
         elif os.environ.get(LIBRARY_EMULATOR_ENV):
             problem = f"{LIBRARY_EMULATOR_ENV} definido com o Storage real"
+        else:
+            problem = credential_project_problem(settings)
     if problem:
         if log and mode != "disabled":
             logger.error("Envio de imagens recusado pela configuração: %s.", problem)
         raise StorageNotConfigured()
     return mode
+
+
+def credential_project_problem(settings: Settings) -> str | None:
+    """Credencial de outro projeto? Só lê o JSON localmente (sem rede) e nunca registra o conteúdo."""
+    expected = settings.firebase_project_id
+    if settings.firebase_service_account_json is not None:
+        if service_account_project(settings.firebase_service_account_json.get_secret_value()) != expected:
+            return "FIREBASE_SERVICE_ACCOUNT_JSON sem project_id ou de outro projeto"
+        return None
+    path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if not path:
+        return None  # ADC do gcloud (authorized_user): não identifica projeto
+    try:
+        info = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "GOOGLE_APPLICATION_CREDENTIALS ilegível"
+    if not isinstance(info, dict):
+        return "GOOGLE_APPLICATION_CREDENTIALS ilegível"
+    if info.get("type") == "service_account" and info.get("project_id") != expected:
+        return "GOOGLE_APPLICATION_CREDENTIALS aponta para conta de serviço de outro projeto"
+    return None
 
 
 def download_base(settings: Settings) -> str:

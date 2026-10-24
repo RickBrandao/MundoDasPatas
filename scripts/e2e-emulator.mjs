@@ -33,7 +33,7 @@ const KEEP_LOGS = process.argv.includes('--keep-logs');
 const WITH_BACKEND = process.argv.includes('--with-backend');
 const SERVE = process.argv.includes('--serve');
 const VITEST_ARGS = process.argv.slice(2).filter((a) => !['--keep-logs', '--with-backend', '--serve'].includes(a));
-const BUCKET = `${PROJECT}.appspot.com`;
+const BUCKET = `${PROJECT}.firebasestorage.app`; // bucket padrão do projeto (única forma aceita pela API)
 const ADMIN_EMAIL = 'admin@e2e.test';
 const ADMIN_PASSWORD = 'senha-e2e-123';
 
@@ -53,7 +53,7 @@ function assertSafeTarget(env) {
     else if (!env[key].startsWith(`${HOST}:`)) problems.push(`${key} não aponta para ${HOST}.`);
   }
   if (env.GOOGLE_APPLICATION_CREDENTIALS || env.FIREBASE_SERVICE_ACCOUNT_JSON) problems.push('credenciais Google presentes no ambiente da API.');
-  if (!env.FIREBASE_STORAGE_BUCKET?.startsWith('demo-')) problems.push('FIREBASE_STORAGE_BUCKET precisa ser do projeto "demo-".');
+  if (env.FIREBASE_STORAGE_BUCKET !== BUCKET) problems.push(`FIREBASE_STORAGE_BUCKET precisa ser ${BUCKET} (projeto "demo-").`);
   if (env.STORAGE_EMULATOR_HOST) problems.push('STORAGE_EMULATOR_HOST presente no ambiente da API.');
   if (problems.length) throw new Error(`execução recusada: ${problems.join(' ')}`);
 }
