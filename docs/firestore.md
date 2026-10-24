@@ -191,6 +191,23 @@ negócio nem cria dados de demonstração. Sem `--confirm-project` idêntico ao 
 Depois, um teste funcional pela API (criar uma categoria real definida pelo cliente) pode ser feito
 no painel quando a TASK 06C ligar o frontend à API.
 
+### Smoke funcional pelo painel e limpeza da execução (TASK 06G)
+
+Os dados fictícios são criados pelo painel com nomes `AUDIT_<run-id>_…`. O script abaixo só aceita o
+Firestore real de `mundo-das-patas---dev`, banco `(default)` (recusa emulador e outros projetos):
+
+```powershell
+python -m scripts.smoke_run counts                                        # SOMENTE LEITURA: contagens e referências órfãs
+python -m scripts.smoke_run discover --run-id AUDIT_<id> --out m.json     # SOMENTE LEITURA: manifesto da execução
+python -m scripts.smoke_run cleanup --manifest m.json --confirm-project mundo-das-patas---dev
+```
+
+A posse é decidida pelos relacionamentos (categoria com o prefixo → claim → produtos da categoria →
+movimentações/vendas desses produtos → idempotência cujo `result_id` aponta para elas), não só pelo
+prefixo. `cleanup` relê tudo, exige que o estado atual coincida com o manifesto e só então apaga os IDs
+listados (idempotência → movimentações → vendas → produtos → claims → categorias). Qualquer
+inconsistência interrompe sem apagar nada. Guarde o manifesto fora do Git (ex.: `.smoke-runs/`).
+
 ---
 
 ## 6. Plano Spark e limitações
