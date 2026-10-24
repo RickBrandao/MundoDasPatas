@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useConfirm, useStore, useToast, useUi } from '../../app/contexts';
 import { Icon } from '../../components/Icon';
-import { imageFor } from '../../components/productArt';
+import { ProductImage } from '../../components/ProductImage';
 import { PUBLIC_STATE, STOCK_ADMIN } from '../../components/status';
 import { stockStatus } from '../../domain/catalog';
 import { normalizeText } from '../../domain/format';
@@ -81,7 +81,7 @@ export function ProductsPage() {
               <div key={p.id} className="admin-row">
                 <div className="admin-row__main">
                   <div className="thumb" style={{ width: 56, height: 56 }}>
-                    <img src={imageFor(p).src} alt="" loading="lazy" />
+                    <ProductImage product={p} loading="lazy" />
                   </div>
                   <div style={{ minWidth: 0 }}>
                     <button type="button" className="admin-row__name" onClick={() => ui.openProductForm(p)}>

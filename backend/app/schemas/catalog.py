@@ -20,7 +20,7 @@ from app.schemas.common import (
 
 
 def _image_url(value: str) -> str:
-    # Imagens ficarão no Cloud Storage; data URLs (usadas na demo) não são aceitas.
+    # Fotos ficam no Cloud Storage e são definidas pelas rotas de imagem; data URLs (demo) nunca são aceitas.
     if value and not value.startswith("https://"):
         raise ValueError("Use uma URL https:// ou deixe vazio.")
     return value
@@ -108,6 +108,15 @@ class ProductUpdate(PatchModel):
     published: bool | None = None
     featured: bool | None = None
     archived: bool | None = None
+
+
+class ImageUploadConfigOut(ApiModel):
+    """Envio de fotos: disponível neste ambiente e limites aplicados pelo servidor."""
+
+    available: bool
+    max_bytes: int
+    accepted_types: list[str]
+    max_side: int
 
 
 # --------------------------------------------------------------------- catálogo público

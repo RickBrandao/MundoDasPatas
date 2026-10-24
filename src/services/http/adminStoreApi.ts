@@ -31,6 +31,8 @@ const ADMIN = '/api/v1/admin';
 /** Quantidade de vendas e movimentações carregadas no painel (máximo aceito pela API). */
 export const HISTORY_LIMIT = 500;
 const WRITE_TIMEOUT_MS = 20_000;
+/** Envio de foto: arquivo de até ~2 MB, recodificação no servidor e gravação no Storage. */
+const UPLOAD_TIMEOUT_MS = 60_000;
 /** Novas tentativas automáticas — somente com a mesma chave de idempotência. */
 const RETRY_DELAYS_MS = [600, 1800];
 
@@ -118,7 +120,7 @@ export function createAdminStoreApi({
   };
 
   async function write(path: string, req: JsonRequest, idempotent: boolean): Promise<unknown> {
-    const full = { ...req, timeoutMs: WRITE_TIMEOUT_MS, signal };
+    const full = { timeoutMs: WRITE_TIMEOUT_MS, ...req, signal };
     for (let attempt = 0; ; attempt++) {
       try {
         return await requestJson(send, `${ADMIN}${path}`, full);
@@ -304,6 +306,40 @@ export function createAdminStoreApi({
     async resetDemo() {
       return { ok: false, error: 'Indisponível no ambiente real: os dados de demonstração nunca são importados para o servidor.' };
     },
+
+    async imageUploadConfig() {
+      try {
+        const o = (await get('/images/config')) as { available?: unknown; maxBytes?: unknown };
+        const available = o?.available === true && Number.isInteger(o.maxBytes) && (o.maxBytes as number) > 0;
+        return { available, maxBytes: available ? (o.maxBytes as number) : 0 };
+      } catch {
+        // Sem confirmação do servidor, o envio não é oferecido (o cadastro continua funcionando).
+        return { available: false, maxBytes: 0 };
+      }
+    },
+
+    async uploadProductImage(productId, image) {
+      try {
+        const body = await write(
+          `/products/${encodeURIComponent(productId)}/image`,
+          { method: 'PUT', rawBody: image, timeoutMs: UPLOAD_TIMEOUT_MS },
+          false,
+        );
+        const product = toProduct(body);
+        return settle((d) => ({ ...d, products: upsert(d.products, product) }), { product });
+      } catch (error) {
+        return fail(error, false, imageFieldErrors);
+      }
+    },
+
+    async removeProductImage(productId) {
+      try {
+        const product = toProduct(await write(`/products/${encodeURIComponent(productId)}/image`, { method: 'DELETE' }, false));
+        return settle((d) => ({ ...d, products: upsert(d.products, product) }), { product });
+      } catch (error) {
+        return fail(error, false, imageFieldErrors);
+      }
+    },
   };
 }
 
@@ -319,6 +355,12 @@ function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
     const timer = setTimeout(done, ms);
     signal?.addEventListener('abort', done, { once: true });
   });
+}
+
+/** Erros do arquivo enviado: o formulário mostra a mensagem junto da foto. */
+function imageFieldErrors(f: ApiFailure): Failure['fieldErrors'] {
+  if (f.kind !== 'http' || ![413, 415, 422].includes(f.status)) return undefined;
+  return { image: f.fieldErrors?.image ?? failureMessage(f) };
 }
 
 function upsert<T extends { id: string }>(list: T[], item: T): T[] {

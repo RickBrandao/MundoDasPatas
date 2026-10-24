@@ -61,7 +61,7 @@ describe('adaptadores DTO → domínio', () => {
     expect(data.settings.showOutOfStock).toBe(true);
   });
 
-  it('data URLs da demonstração nunca vão ao servidor', () => {
+  it('data URLs da demonstração nunca vão ao servidor (a foto só muda pelas rotas de imagem)', () => {
     const form = {
       id: null,
       name: ' Bola ',
@@ -76,8 +76,10 @@ describe('adaptadores DTO → domínio', () => {
       published: true,
       featured: false,
     };
-    expect(productPayload(form, { priceCents: 990, minStock: 0 })).toMatchObject({ name: 'Bola', imageUrl: '', priceCents: 990, showPrice: true });
-    expect(productPayload({ ...form, imageUrl: 'https://cdn/x.jpg' }, { priceCents: 990, minStock: 0 }).imageUrl).toBe('https://cdn/x.jpg');
+    expect(productPayload(form, { priceCents: 990, minStock: 0 })).toMatchObject({ name: 'Bola', priceCents: 990, showPrice: true });
+    expect(productPayload(form, { priceCents: 990, minStock: 0 })).not.toHaveProperty('imageUrl');
+    // Nem uma URL https: o arquivo e a URL são gravados juntos pelo servidor (PUT/DELETE /products/{id}/image).
+    expect(productPayload({ ...form, imageUrl: 'https://cdn/x.jpg' }, { priceCents: 990, minStock: 0 })).not.toHaveProperty('imageUrl');
     expect(productPayload({ ...form, price: '' }, { priceCents: null, minStock: 0 }).showPrice).toBe(false);
   });
 });

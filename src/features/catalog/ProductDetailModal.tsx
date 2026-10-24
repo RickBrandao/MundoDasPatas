@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useCart, useStore, useToast, useUi } from '../../app/contexts';
 import { Icon } from '../../components/Icon';
 import { Modal } from '../../components/Modal';
+import { ProductImage } from '../../components/ProductImage';
 import { imageFor } from '../../components/productArt';
 import { STOCK_PUBLIC } from '../../components/status';
 import { stockStatus } from '../../domain/catalog';
@@ -27,7 +28,7 @@ function DetailContent({ product: p, adminPreview, onClose }: { product: Product
   const toast = useToast();
   const [qty, setQty] = useState(1);
   const st = stockStatus(p);
-  const img = imageFor(p);
+  const [artShown, setArtShown] = useState(imageFor(p).isArt);
   const category = data.categories.find((c) => c.id === p.categoryId);
   const price = hasPublicPrice(p);
 
@@ -39,8 +40,8 @@ function DetailContent({ product: p, adminPreview, onClose }: { product: Product
         </button>
       </div>
       <div className="detail__media">
-        {img.isArt && <span className="detail__art-tag">Ilustração demonstrativa</span>}
-        <img src={img.src} alt="" />
+        {artShown && <span className="detail__art-tag">Ilustração demonstrativa</span>}
+        <ProductImage product={p} onFallback={() => setArtShown(true)} />
       </div>
       <div className="detail__body">
         <div className="detail__meta">{productMeta(p, category?.name)}</div>

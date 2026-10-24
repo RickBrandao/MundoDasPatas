@@ -81,6 +81,7 @@ def product_to_doc(p: Product) -> Doc:
         "category_id": p.category_id,
         "brand": p.brand,
         "image_url": p.image_url,
+        "image_path": p.image_path,
         "price_cents": p.price_cents,
         "show_price": p.show_price,
         "stock": p.stock,
@@ -110,6 +111,8 @@ def product_from_doc(doc_id: str, d: Doc) -> Product:
         archived=d["archived"],
         created_at=from_timestamp(d["created_at"]),
         updated_at=from_timestamp(d["updated_at"]),
+        # Ausente em produtos gravados antes da TASK 07A.
+        image_path=d.get("image_path", ""),
     )
 
 

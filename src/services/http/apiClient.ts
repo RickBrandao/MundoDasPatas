@@ -33,8 +33,11 @@ export class ApiRequestError extends Error {
 export const DEFAULT_TIMEOUT_MS = 15_000;
 
 export interface JsonRequest {
-  method?: 'GET' | 'POST' | 'PATCH' | 'PUT';
+  method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+  /** Corpo JSON. */
   body?: unknown;
+  /** Corpo binário (ex.: foto), enviado como está com o `Content-Type` do próprio Blob. Exclui `body`. */
+  rawBody?: Blob;
   headers?: Record<string, string>;
   timeoutMs?: number;
   signal?: AbortSignal;
@@ -72,7 +75,8 @@ export async function requestJson(send: Send, path: string, req: JsonRequest = {
   };
 
   const headers: Record<string, string> = { Accept: 'application/json', ...req.headers };
-  if (req.body !== undefined) headers['Content-Type'] = 'application/json';
+  if (req.rawBody) headers['Content-Type'] = req.rawBody.type || 'application/octet-stream';
+  else if (req.body !== undefined) headers['Content-Type'] = 'application/json';
 
   try {
     let response: Response;
@@ -81,7 +85,7 @@ export async function requestJson(send: Send, path: string, req: JsonRequest = {
         send(path, {
           method: req.method ?? 'GET',
           headers,
-          body: req.body === undefined ? undefined : JSON.stringify(req.body),
+          body: req.rawBody ?? (req.body === undefined ? undefined : JSON.stringify(req.body)),
           signal: controller.signal,
         }),
         cancelled,
@@ -162,8 +166,10 @@ export const MESSAGES = {
   notFound: 'Registro não encontrado. A lista foi atualizada.',
   conflict: 'A operação conflita com o estado atual. A lista foi atualizada.',
   validation: 'Revise os campos destacados.',
+  tooLarge: 'Arquivo grande demais para envio.',
   busy: 'Muitas operações simultâneas sobre os mesmos dados. Tente novamente.',
   unavailable: 'Serviço temporariamente indisponível. Tente novamente em instantes.',
+  storage: 'O envio de fotos está indisponível no momento. Tente novamente mais tarde.',
   server: 'Erro interno no servidor. Tente novamente em instantes.',
 };
 
@@ -191,7 +197,10 @@ export function failureMessage(f: ApiFailure): string {
         case 400:
         case 422:
           return f.serverMessage ?? MESSAGES.validation;
+        case 413:
+          return f.serverMessage ?? MESSAGES.tooLarge;
         case 503:
+          if (f.code === 'storage_unavailable') return MESSAGES.storage;
           return f.code === 'database_busy' ? MESSAGES.busy : MESSAGES.unavailable;
         default:
           return f.status >= 500 ? MESSAGES.server : (f.serverMessage ?? MESSAGES.server);

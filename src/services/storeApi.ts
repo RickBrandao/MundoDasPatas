@@ -59,6 +59,13 @@ export interface MutationOptions {
   idempotencyKey?: string;
 }
 
+/** Envio de fotos no ambiente atual (somente `api-admin`; limites conferidos também pelo servidor). */
+export interface ImageUploadConfig {
+  available: boolean;
+  /** Tamanho máximo do arquivo enviado (já comprimido no navegador). */
+  maxBytes: number;
+}
+
 export interface StoreApi {
   readonly source: StoreSource;
   /** Escopo da sessão (somente `api-admin`): abortado, nenhum resultado desta API deve alterar a tela. */
@@ -73,4 +80,12 @@ export interface StoreApi {
   toggleCategory(id: string): Promise<ApiResult<{ active: boolean }>>;
   saveSettings(settings: Settings): Promise<ApiResult>;
   resetDemo(): Promise<ApiResult>;
+  /**
+   * Fotos no Cloud Storage (somente `api-admin`). A demonstração guarda a foto no próprio produto
+   * (data URL em `saveProduct`) e não implementa estes métodos.
+   */
+  imageUploadConfig?(): Promise<ImageUploadConfig>;
+  /** Envia/substitui a foto de um produto já salvo; o produto só muda depois que a foto existe. */
+  uploadProductImage?(productId: string, image: Blob): Promise<ApiResult<{ product: Product }>>;
+  removeProductImage?(productId: string): Promise<ApiResult<{ product: Product }>>;
 }

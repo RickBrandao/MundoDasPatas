@@ -45,7 +45,7 @@ class Product:
     description: str
     category_id: str
     brand: str
-    # URL pública da imagem (futuramente no Cloud Storage). Vazio = ilustração padrão.
+    # URL pública da foto (download do Cloud Storage com token) ou vazio = ilustração padrão.
     image_url: str
     price_cents: int | None
     show_price: bool
@@ -56,6 +56,9 @@ class Product:
     archived: bool
     created_at: datetime
     updated_at: datetime
+    # Objeto no Storage que pertence a este produto (`products/{id}/images/{imageId}.webp`), ou vazio.
+    # Interno: nunca sai na API. Só um objeto registrado aqui pode ser excluído como "foto anterior".
+    image_path: str = ""
 
 
 @dataclass(frozen=True, slots=True)

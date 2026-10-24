@@ -1,0 +1,19 @@
+rules_version = '2';
+
+// Cloud Storage for Firebase — Mundo das Patas (TASK 07A).
+//
+// Nenhum acesso direto pelo SDK cliente (navegador), nem para usuários autenticados:
+// - envio, substituição e exclusão passam pelo FastAPI, que confere o ID Token e a allowlist
+//   de administradores (ADMIN_ALLOWED_UIDS) e grava com o Admin SDK (que ignora estas regras);
+// - a vitrine lê cada foto pela URL de download com token gerada pelo servidor
+//   (/v0/b/{bucket}/o/{caminho}?alt=media&token=...), que libera somente aquele objeto e
+//   independe destas regras. Sem token: nada é lido, listado, enviado ou excluído.
+//
+// Nunca publicadas por esta TASK (o projeto Dev está no plano Spark, sem bucket). Ver docs/storage.md.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

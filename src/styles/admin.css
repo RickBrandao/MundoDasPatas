@@ -874,3 +874,19 @@
   opacity: 0.7;
   cursor: progress;
 }
+.pf-image__pick.is-disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.pf-image__progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--c-text-2);
+}
+.pf-image__progress progress {
+  width: 120px;
+  height: 8px;
+  accent-color: var(--c-teal);
+}

@@ -9,6 +9,9 @@ import { API, json } from './fakeAuth';
  *
  * Falhas controladas: `failNext` (resposta ou falha de rede antes de aplicar) e `loseNextResponse`
  * (aplica a operação e "perde" a resposta, como uma queda de conexão depois do commit).
+ *
+ * Fotos (TASK 07A): `PUT/DELETE /admin/products/{id}/image` e `GET /admin/images/config`. O Storage
+ * começa desligado (como no servidor sem configuração); `enableImages()` liga. Objetos ficam em `db.images`.
  */
 export interface Call {
   method: string;
@@ -108,7 +111,11 @@ export function createFakeBackend(options: { me?: Handler } = {}) {
     sales: [] as Sale[],
     settings: null as Settings | null,
     idempotency: new Map<string, { hash: string; status: number; body: unknown }>(),
+    /** Objetos no "Storage": caminho → tipo e tamanho do arquivo recebido. */
+    images: new Map<string, { productId: string; type: string; size: number }>(),
   };
+  let imagesEnabled = false;
+  const imagePaths = new Map<string, string>(); // produto → caminho atual
   const calls: Call[] = [];
   const failures: { method: string; path: string; failure: Failure }[] = [];
   const lost: { method: string; path: string }[] = [];
@@ -147,7 +154,15 @@ export function createFakeBackend(options: { me?: Handler } = {}) {
     return json(r.status, r.body);
   }
 
-  function route(method: string, path: string, token: string | null, key: string | null, body: Record<string, unknown>): Response | Promise<Response> {
+  function route(
+    method: string,
+    path: string,
+    token: string | null,
+    key: string | null,
+    body: Record<string, unknown>,
+    rawType?: string,
+    rawSize?: number,
+  ): Response | Promise<Response> {
     const url = new URL(path, API);
     const p = url.pathname;
 
@@ -236,12 +251,42 @@ export function createFakeBackend(options: { me?: Handler } = {}) {
         return err(422, 'validation_error', 'Revise os campos destacados.', { imageUrl: 'Value error, Use uma URL https:// ou deixe vazio.' });
       }
       const t = now();
-      const x = { ...(body as unknown as Product), id: newId(), archived: false, createdAt: t, updatedAt: t, stock: 0 };
+      // Como o servidor: sem `imageUrl` no corpo, o produto nasce sem foto.
+      const x = { ...(body as unknown as Product), imageUrl: String(body.imageUrl ?? ''), id: newId(), archived: false, createdAt: t, updatedAt: t, stock: 0 };
       db.products.unshift(x);
       const stock = Number(body.stock ?? 0);
       if (stock > 0) move(x, 'cadastro', stock, 'Estoque inicial', 'Cadastro de produto', actor);
       return json(201, adminProduct(x));
     }
+    if (sub === '/images/config' && method === 'GET') {
+      return json(200, { available: imagesEnabled, maxBytes: 2 * 1024 * 1024, acceptedTypes: ['image/jpeg', 'image/png', 'image/webp'], maxSide: 1600 });
+    }
+    const imageMatch = /^\/products\/([^/]+)\/image$/.exec(sub);
+    if (imageMatch && (method === 'PUT' || method === 'DELETE')) {
+      const x = db.products.find((y) => y.id === imageMatch[1]);
+      if (method === 'PUT') {
+        const type = rawType ?? '';
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(type)) return err(415, 'unsupported_media_type', 'Formato não suportado. Use JPEG, PNG ou WebP.');
+        if (!imagesEnabled) return err(503, 'storage_unavailable', 'Envio de imagens indisponível no momento.');
+        if (!x) return err(404, 'not_found', 'Produto não encontrado.');
+        if ((rawSize ?? 0) > 2 * 1024 * 1024) return err(413, 'payload_too_large', 'Arquivo grande demais para envio.');
+        const path = `products/${x.id}/images/${newId()}.webp`;
+        db.images.set(path, { productId: x.id, type, size: rawSize ?? 0 });
+        const previous = imagePaths.get(x.id);
+        if (previous) db.images.delete(previous);
+        imagePaths.set(x.id, path);
+        x.imageUrl = `https://storage.test/v0/b/bucket/o/${encodeURIComponent(path)}?alt=media&token=${newId()}`;
+      } else {
+        if (!x) return err(404, 'not_found', 'Produto não encontrado.');
+        const previous = imagePaths.get(x.id);
+        if (previous) db.images.delete(previous);
+        imagePaths.delete(x.id);
+        x.imageUrl = '';
+      }
+      x.updatedAt = now();
+      return json(200, adminProduct(x));
+    }
+
     const prodMatch = /^\/products\/([^/]+)$/.exec(sub);
     if (prodMatch && method === 'PATCH') {
       const x = db.products.find((y) => y.id === prodMatch[1]);
@@ -309,7 +354,8 @@ export function createFakeBackend(options: { me?: Handler } = {}) {
     const method = init.method ?? 'GET';
     const token = headers.get('Authorization')?.replace(/^Bearer /, '') ?? null;
     const body = typeof init.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : {};
-    calls.push({ method, path, token, idempotencyKey: headers.get('Idempotency-Key'), body: init.body ? body : undefined });
+    const raw = init.body instanceof Blob ? init.body : undefined;
+    calls.push({ method, path, token, idempotencyKey: headers.get('Idempotency-Key'), body: typeof init.body === 'string' ? body : undefined });
 
     const failure = take(failures, method, path);
     if (failure) {
@@ -333,7 +379,7 @@ export function createFakeBackend(options: { me?: Handler } = {}) {
       ]);
     };
     if (hold?.apply === 'before') await wait();
-    const response = await route(method, path, token, headers.get('Idempotency-Key'), body);
+    const response = await route(method, path, token, headers.get('Idempotency-Key'), body, raw ? (headers.get('Content-Type') ?? undefined) : undefined, raw?.size);
     if (hold?.apply === 'after') await wait();
     if (take(lost, method, path)) throw new TypeError('Failed to fetch');
     if (hold?.apply === 'body') {
@@ -360,6 +406,10 @@ export function createFakeBackend(options: { me?: Handler } = {}) {
     },
     setMe(handler: Handler) {
       me = handler;
+    },
+    /** Liga o "Storage" do servidor simulado (desligado por padrão, como sem configuração). */
+    enableImages(enabled = true) {
+      imagesEnabled = enabled;
     },
     /** A próxima requisição (método + início do caminho) falha antes de chegar ao "banco". */
     failNext(method: string, path: string, failure: Failure) {

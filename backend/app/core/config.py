@@ -5,6 +5,7 @@ e a aplicação **não inicia** se algo inseguro ou incompleto for detectado (fa
 """
 
 import json
+import re
 from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated, Self
@@ -18,6 +19,13 @@ class AppEnv(StrEnum):
     TEST = "test"
     STAGING = "staging"
     PRODUCTION = "production"
+
+
+class ImageStorage(StrEnum):
+    # Envio de fotos desligado: produtos são salvos sem imagem e o upload responde 503.
+    DISABLED = "disabled"
+    # Cloud Storage for Firebase (real ou, em desenvolvimento, o Storage Emulator).
+    FIREBASE = "firebase"
 
 
 class DataBackend(StrEnum):
@@ -71,6 +79,13 @@ class Settings(BaseSettings):
 
     data_backend: DataBackend = DataBackend.MEMORY
 
+    # Fotos dos produtos (ver docs/storage.md). Sem configuração válida, o upload responde 503.
+    image_storage: ImageStorage = ImageStorage.DISABLED
+    # Bucket do Cloud Storage for Firebase (ex.: "<projeto>.firebasestorage.app").
+    firebase_storage_bucket: str | None = None
+    # Storage Emulator (host:porta, sem http://; convenção do Firebase). Proibido em staging/produção.
+    firebase_storage_emulator_host: str | None = None
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _parse_origins(cls, value: object) -> object:
@@ -80,6 +95,19 @@ class Settings(BaseSettings):
     @classmethod
     def _parse_uids(cls, value: object) -> object:
         return _split_csv(value)
+
+    @field_validator("firebase_storage_bucket", "firebase_storage_emulator_host", mode="before")
+    @classmethod
+    def _blank_is_none(cls, value: object) -> object:
+        return value.strip() or None if isinstance(value, str) else value
+
+    @field_validator("firebase_storage_bucket")
+    @classmethod
+    def _check_bucket(cls, value: str | None) -> str | None:
+        # Nome de bucket do Google Cloud Storage: só o nome, sem gs:// nem caminho.
+        if value is not None and not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]", value):
+            raise ValueError("FIREBASE_STORAGE_BUCKET inválido (use só o nome do bucket, sem gs:// ou barras).")
+        return value
 
     @field_validator("cors_origins")
     @classmethod
@@ -114,6 +142,10 @@ class Settings(BaseSettings):
                 "FIREBASE_SERVICE_ACCOUNT_JSON não é uma conta de serviço válida "
                 "(objeto JSON com type=service_account, project_id, client_email e private_key)."
             )
+        if self.firebase_storage_emulator_host:
+            problems.append("FIREBASE_STORAGE_EMULATOR_HOST não pode estar definido (as fotos iriam para o emulador local).")
+        if self.image_storage is ImageStorage.FIREBASE and not self.firebase_storage_bucket:
+            problems.append("IMAGE_STORAGE=firebase exige FIREBASE_STORAGE_BUCKET.")
         if "*" in self.cors_origins:
             problems.append("CORS_ORIGINS não pode conter '*'.")
         if self.app_env is AppEnv.PRODUCTION and any(o.startswith("http://") for o in self.cors_origins):

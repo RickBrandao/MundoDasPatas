@@ -3,3 +3,5 @@ fastapi==0.152.0
 pydantic==2.14.1
 pydantic-settings==2.16.1
 firebase-admin==7.7.0
+# Validação e recodificação das fotos dos produtos (TASK 07A).
+pillow==12.1.1

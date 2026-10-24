@@ -147,6 +147,9 @@ passa a usar dados reais quando o repositório Firestore for implementado. Com
 | GET | `/api/v1/admin/products` | admin | protegido · funcional (memória) |
 | POST | `/api/v1/admin/products` | admin | protegido · funcional (memória) |
 | PATCH | `/api/v1/admin/products/{id}` | admin | protegido · funcional (memória) |
+| PUT | `/api/v1/admin/products/{id}/image` | admin | protegido · foto do produto (corpo binário JPEG/PNG/WebP ≤ 2 MiB) |
+| DELETE | `/api/v1/admin/products/{id}/image` | admin | protegido · remove a foto |
+| GET | `/api/v1/admin/images/config` | admin | protegido · envio de fotos disponível? limites |
 | GET | `/api/v1/admin/categories` | admin | protegido · funcional (memória) |
 | POST | `/api/v1/admin/categories` | admin | protegido · funcional (memória) |
 | PATCH | `/api/v1/admin/categories/{id}` | admin | protegido · funcional (memória) |
@@ -164,8 +167,8 @@ autorização antes de abrir o painel: `401` sem token/token inválido, expirado
 de `ADMIN_ALLOWED_UIDS`; `503` Firebase indisponível ou não configurado. Usa a mesma dependência
 `require_admin` do roteador e não depende de persistência (funciona com `DATA_BACKEND=firestore`).
 
-Upload de imagens: **contrato futuro, sem rota.** O produto guarda apenas `imageUrl` (`https://`
-ou vazio); data URLs, usadas na demo, são recusadas. O upload irá para o Cloud Storage.
+Fotos (TASK 07A): só pelas rotas `/products/{id}/image`; `imageUrl` não é aceito no cadastro/edição.
+O servidor valida, recodifica em WebP e grava no Cloud Storage — ver [`docs/storage.md`](../docs/storage.md).
 
 ### Regras públicas
 
@@ -606,7 +609,8 @@ o firebase-admin traz `google-cloud-firestore` e `grpcio`.
 - **Autenticação real:** login implementado (TASK 05B); falta o smoke test ponta a ponta com o usuário real.
 - **Firestore real:** publicar regras/índices e executar o smoke test (com aprovação do proprietário);
   TTL de `idempotency_keys` quando houver faturamento — ver [`docs/firestore.md`](../docs/firestore.md).
-- **Imagens:** upload para o Cloud Storage com URLs assinadas ou regras de Storage.
+- **Imagens:** envio implementado e validado no Storage Emulator (TASK 07A); o bucket real exige o
+  plano Blaze — ver [`docs/storage.md`](../docs/storage.md) §7.
 - **Integração React:** itens da seção 10.
 - **Homologação:** deploy na Vercel (staging), domínio, CORS de homologação, monitoramento de logs
   (incluindo os logs de requisição da plataforma, que a aplicação não controla).

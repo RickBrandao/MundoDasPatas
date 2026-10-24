@@ -11,6 +11,7 @@ from app.schemas.catalog import CategoryCreate, CategoryUpdate, ProductCreate, P
 from app.services.common import Clock, IdFactory, new_id, utc_now
 
 PRICE_REQUIRED = "Informe o preço ou desmarque “Exibir preço no catálogo”."
+IMAGE_VIA_UPLOAD = "A foto é definida pelo envio de imagem do produto."
 
 
 def load_settings(repos: Repositories) -> StoreSettings:
@@ -87,6 +88,9 @@ class ProductService:
         return product
 
     def create(self, data: ProductCreate, actor_uid: str) -> Product:
+        # A foto chega depois, por `PUT /products/{id}/image`: o produto precisa existir antes.
+        if data.image_url:
+            raise ValidationFailed(IMAGE_VIA_UPLOAD, field_errors={"imageUrl": IMAGE_VIA_UPLOAD})
         self._ensure_category(data.category_id)
         _ensure_price_rule(data.show_price, data.price_cents)
         now = self._clock()
@@ -128,7 +132,11 @@ class ProductService:
             current = tx.get_products([product_id]).get(product_id)
             if current is None:
                 raise NotFound("Produto não encontrado.")
-            updated = replace(current, **changes, updated_at=now)
+            # URL e objeto da foto mudam juntos, só pelas rotas de imagem; reenviar a URL atual é aceito (sem efeito).
+            fields = dict(changes)  # cópia: a função pode ser reexecutada pela transação
+            if fields.pop("image_url", current.image_url) != current.image_url:
+                raise ValidationFailed(IMAGE_VIA_UPLOAD, field_errors={"imageUrl": IMAGE_VIA_UPLOAD})
+            updated = replace(current, **fields, updated_at=now)
             if updated.archived:
                 updated = replace(updated, published=False)  # arquivado nunca fica publicado
             _ensure_price_rule(updated.show_price, updated.price_cents)

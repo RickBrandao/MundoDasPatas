@@ -82,6 +82,18 @@ class InsufficientStock(Conflict):
     message = "Estoque insuficiente."
 
 
+class PayloadTooLarge(ApiError):
+    status_code = 413
+    code = "payload_too_large"
+    message = "Arquivo grande demais para envio."
+
+
+class UnsupportedMediaType(ApiError):
+    status_code = 415
+    code = "unsupported_media_type"
+    message = "Formato não suportado. Use JPEG, PNG ou WebP."
+
+
 class ValidationFailed(ApiError):
     """Regra de negócio violada em campos da requisição (ex.: categoria inexistente)."""
 

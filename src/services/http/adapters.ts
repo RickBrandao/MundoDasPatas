@@ -121,12 +121,15 @@ export function toPublicProduct(raw: unknown): Product {
 /** Data URLs (fotos da demonstração) nunca vão ao servidor: o backend só aceita https:// ou vazio. */
 export const serverImageUrl = (url: string) => (url.startsWith('https://') ? url : '');
 
+/**
+ * Sem `imageUrl`: a foto muda só pelas rotas próprias (`PUT/DELETE /products/{id}/image`), que gravam
+ * o arquivo e a URL juntos no servidor. Assim uma edição do cadastro nunca desfaz uma foto recém-enviada.
+ */
 export interface ProductPayload {
   name: string;
   description: string;
   categoryId: string;
   brand: string;
-  imageUrl: string;
   priceCents: number | null;
   showPrice: boolean;
   minStock: number;
@@ -141,7 +144,6 @@ export function productPayload(f: ProductFormInput, v: { priceCents: number | nu
     description: f.description.trim(),
     categoryId: f.categoryId,
     brand: f.brand.trim(),
-    imageUrl: serverImageUrl(f.imageUrl),
     priceCents: v.priceCents,
     showPrice: f.showPrice && v.priceCents != null && v.priceCents > 0,
     minStock: v.minStock,

@@ -5,7 +5,7 @@ import type { Cart, Product, Sale, SaleItem, Settings, StoreData } from '../doma
 import type { AdminAccess } from '../services/auth/adminAccess';
 import type { DataSource } from '../services/dataSource';
 import type { DashboardSummary } from '../services/http/adapters';
-import type { ApiResult, MutationOptions, StoreSource } from '../services/storeApi';
+import type { ApiResult, ImageUploadConfig, MutationOptions, StoreSource } from '../services/storeApi';
 
 function useRequired<T>(ctx: React.Context<T | null>, name: string): T {
   const v = useContext(ctx);
@@ -42,6 +42,10 @@ export interface StoreActions {
   toggleCategory(id: string): Promise<ApiResult<{ active: boolean }>>;
   saveSettings(settings: Settings): Promise<ApiResult>;
   resetDemo(): Promise<ApiResult>;
+  /** Envio de fotos para o servidor (a demonstração responde indisponível: usa a foto local do formulário). */
+  imageUploadConfig(): Promise<ImageUploadConfig>;
+  uploadProductImage(productId: string, image: Blob): Promise<ApiResult<{ product: Product }>>;
+  removeProductImage(productId: string): Promise<ApiResult<{ product: Product }>>;
   /** Relê os dados da origem, se mais antigos que `maxAgeMs` (falha mantém o estado atual). */
   refresh(maxAgeMs?: number): Promise<void>;
 }

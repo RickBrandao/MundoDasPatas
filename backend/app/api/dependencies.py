@@ -13,8 +13,10 @@ from app.core.config import Settings
 from app.core.security import AdminPrincipal, FirebaseTokenVerifier, TokenVerifier, authenticate_admin
 from app.repositories.base import Repositories
 from app.services.catalog import CategoryService, ProductService, PublicCatalogService
+from app.services.images import ProductImageService
 from app.services.inventory import InventoryService
 from app.services.store import DashboardService, SettingsService
+from app.storage.base import ObjectStore
 
 # auto_error=False: a ausência do token vira o erro padronizado 401 (e não o 403 padrão do FastAPI).
 _bearer = HTTPBearer(auto_error=False, description="Firebase ID Token do usuário administrativo.")
@@ -60,6 +62,14 @@ def get_repositories(request: Request) -> Repositories:
 
 
 ReposDep = Annotated[Repositories, Depends(get_repositories)]
+
+
+def get_object_store(request: Request) -> ObjectStore | None:
+    return request.app.state.object_store
+
+
+def get_image_service(repos: ReposDep, store: Annotated[ObjectStore | None, Depends(get_object_store)]) -> ProductImageService:
+    return ProductImageService(repos, store)
 
 
 def get_public_catalog(repos: ReposDep) -> PublicCatalogService:

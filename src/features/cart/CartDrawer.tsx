@@ -1,7 +1,7 @@
 import { useCart, useConfirm, useStore, useToast, useUi } from '../../app/contexts';
 import { Icon } from '../../components/Icon';
 import { CloseButton, Modal } from '../../components/Modal';
-import { imageFor } from '../../components/productArt';
+import { ProductImage } from '../../components/ProductImage';
 import { pluralize } from '../../domain/format';
 import { formatBRL, hasPublicPrice } from '../../domain/money';
 import { buildOrderMessage } from '../../domain/whatsapp';
@@ -48,7 +48,7 @@ export function CartDrawer() {
             {lines.map(({ product: p, qty, atMax }) => (
               <div key={p.id} className="cart-line">
                 <div className="thumb" style={{ width: 64, height: 64 }}>
-                  <img src={imageFor(p).src} alt="" />
+                  <ProductImage product={p} />
                 </div>
                 <div className="cart-line__body">
                   <div className="cart-line__name">{p.name}</div>

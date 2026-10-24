@@ -56,8 +56,9 @@ StoreProvider (raiz)  ── api pública: createPublicStoreApi ── GET /api/
 - **Erros:** 400/404/409/422 usam a mensagem do servidor (regras de negócio em português); 401/403/5xx usam
   mensagens fixas; detalhes de 500 nunca aparecem. `fieldErrors` vão aos campos (`priceCents` → `price`);
   mensagens do Pydantic viram "Valor inválido." / "Texto muito curto."
-- **Imagens:** sem upload no modo real (aviso no formulário); data URLs nunca são enviadas; vazio usa a
-  ilustração padrão da categoria. Upload no Cloud Storage fica para uma task futura.
+- **Imagens:** no modo real, a foto é compactada no navegador e enviada ao FastAPI depois de salvar o
+  produto (Cloud Storage, TASK 07A — ver [`storage.md`](storage.md)); data URLs nunca são enviadas; sem
+  foto (ou se a imagem falhar ao carregar) usa a ilustração padrão da categoria.
 - **Banco vazio:** catálogo vazio sem erro, painel zerado, avisos para cadastrar a primeira categoria.
   Nada é gravado só por abrir páginas (configurações padrão não são persistidas implicitamente).
 - **WhatsApp:** abrir/preparar a mensagem não cria venda nem altera estoque.
@@ -147,7 +148,7 @@ Não há revogação global de tokens no logout (afetaria outras sessões do mes
 
 ## 7. Pendências
 
-- Upload de imagens (Cloud Storage).
+- Fotos no Storage real: exige o plano Blaze e o bucket do projeto Dev ([`storage.md`](storage.md) §7).
 - Histórico além das 500 vendas/movimentações mais recentes (paginação).
 - Teste funcional com dados no Firestore real do projeto Dev: depende de login do proprietário e de
   aprovação para gravar dados de teste (ver relatório da TASK 06C).

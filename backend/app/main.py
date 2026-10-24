@@ -2,8 +2,8 @@
 
 `create_app()` monta a aplicação a partir da configuração (testes passam a sua própria).
 `app` é a instância usada por `uvicorn app.main:app` e, futuramente, pela Vercel.
-Nenhuma conexão externa é aberta aqui: Firebase só é inicializado na primeira verificação de token
-e o cliente do Firestore, na primeira operação de dados.
+Nenhuma conexão externa é aberta aqui: Firebase só é inicializado na primeira verificação de token,
+o cliente do Firestore na primeira operação de dados e o do Cloud Storage no primeiro envio de foto.
 """
 
 from collections.abc import Awaitable, Callable
@@ -13,12 +13,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
 from app.api.v1.router import router as api_v1_router
-from app.core.config import DataBackend, Settings, get_settings
+from app.core.config import DataBackend, ImageStorage, Settings, get_settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
+from app.core.storage import StorageUnavailable, check_storage_config
 from app.repositories.base import Repositories
 from app.repositories.memory import create_memory_repositories
 from app.schemas.store import DependencyStatus, HealthOut
+from app.storage.base import ObjectStore
 
 
 def build_repositories(settings: Settings) -> Repositories:
@@ -30,7 +32,20 @@ def build_repositories(settings: Settings) -> Repositories:
     return create_firestore_repositories(settings)
 
 
-def create_app(settings: Settings | None = None, repositories: Repositories | None = None) -> FastAPI:
+def build_object_store(settings: Settings) -> ObjectStore | None:
+    if settings.image_storage is ImageStorage.DISABLED:
+        return None
+    # A configuração é conferida no primeiro uso (503 se inválida), como no Firestore.
+    from app.storage.firebase import FirebaseObjectStore
+
+    return FirebaseObjectStore(settings)
+
+
+def create_app(
+    settings: Settings | None = None,
+    repositories: Repositories | None = None,
+    object_store: ObjectStore | None = None,
+) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level)
 
@@ -44,13 +59,14 @@ def create_app(settings: Settings | None = None, repositories: Repositories | No
     )
     app.state.settings = settings
     app.state.repositories = repositories if repositories is not None else build_repositories(settings)
+    app.state.object_store = object_store if object_store is not None else build_object_store(settings)
 
     register_error_handlers(app)
     if settings.cors_origins:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=settings.cors_origins,
-            allow_methods=["GET", "POST", "PATCH", "PUT"],
+            allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
             allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
             expose_headers=["Idempotent-Replayed"],
             # Sem cookies: a autenticação vai no cabeçalho Authorization.
@@ -92,7 +108,23 @@ def _dependencies(app: FastAPI) -> dict[str, DependencyStatus]:
         database = DependencyStatus(status="emulator", detail="Firestore Emulator local (somente desenvolvimento).")
     else:
         database = DependencyStatus(status="configured", detail="Cloud Firestore configurado (não verificado por este endpoint).")
-    return {"auth": auth, "database": database}
+    return {"auth": auth, "database": database, "storage": _storage_status(settings, app.state.object_store)}
+
+
+def _storage_status(settings: Settings, store: ObjectStore | None) -> DependencyStatus:
+    if store is None:
+        return DependencyStatus(status="disabled", detail="Envio de fotos desligado: produtos usam a ilustração padrão.")
+    if settings.image_storage is ImageStorage.DISABLED:
+        return DependencyStatus(status="ephemeral", detail="Armazenamento de fotos substituído (somente testes).")
+    try:
+        mode = check_storage_config(settings, log=False)
+    except StorageUnavailable:
+        return DependencyStatus(
+            status="not_configured", detail="Configuração do Cloud Storage incompleta ou recusada: envio responde 503."
+        )
+    if mode == "emulator":
+        return DependencyStatus(status="emulator", detail="Storage Emulator local (somente desenvolvimento).")
+    return DependencyStatus(status="configured", detail="Cloud Storage configurado (não verificado por este endpoint).")
 
 
 app = create_app()

@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 /**
- * Runner autocontido dos testes de ponta a ponta (TASK 06E): `npm run test:e2e:emulator`.
+ * Runner autocontido dos testes de ponta a ponta (TASK 06E, Storage na 07A): `npm run test:e2e:emulator`.
  *
  * 1. confere pré-requisitos (Firebase CLI, Java, Python do backend);
  * 2. escolhe portas livres (nunca encerra processos alheios: porta ocupada → usa a próxima livre);
- * 3. sobe Firestore Emulator + Auth Emulator com uma configuração temporária (projeto demo-*);
+ * 3. sobe Firestore + Auth + Storage Emulator com uma configuração temporária (projeto demo-*, regras do repositório);
  * 4. sobe o FastAPI fora de `backend/` (não lê `backend/.env`), sem credenciais Google reais;
- * 5. espera os health checks e confirma que a API usa o emulador;
+ * 5. espera os health checks e confirma que a API usa os emuladores (banco e fotos);
  * 6. roda `vitest --config vitest.e2e.config.ts` (com `--with-backend`, antes roda `pytest tests_emulator`);
  * 7. encerra somente os processos que iniciou (árvore inteira) e confere que as portas foram liberadas.
+ *
+ * `--serve`: em vez de rodar os testes, sobe também o frontend (`vite` dev, ligado aos emuladores), cria o
+ * administrador de teste e mantém tudo no ar até Ctrl+C — para conferência visual no navegador.
  *
  * Funciona no Windows PowerShell (e em Linux/macOS). Logs: pasta temporária impressa no início.
  */
@@ -28,7 +31,11 @@ const WIN = process.platform === 'win32';
 const KEEP_LOGS = process.argv.includes('--keep-logs');
 /** Argumentos extras repassados ao Vitest (ex.: `npm run test:e2e:emulator -- --reporter=hanging-process`). */
 const WITH_BACKEND = process.argv.includes('--with-backend');
-const VITEST_ARGS = process.argv.slice(2).filter((a) => a !== '--keep-logs' && a !== '--with-backend');
+const SERVE = process.argv.includes('--serve');
+const VITEST_ARGS = process.argv.slice(2).filter((a) => !['--keep-logs', '--with-backend', '--serve'].includes(a));
+const BUCKET = `${PROJECT}.appspot.com`;
+const ADMIN_EMAIL = 'admin@e2e.test';
+const ADMIN_PASSWORD = 'senha-e2e-123';
 
 const log = (msg) => console.log(`[e2e] ${msg}`);
 const fail = (msg) => {
@@ -41,11 +48,13 @@ const fail = (msg) => {
 function assertSafeTarget(env) {
   const problems = [];
   if (!env.FIREBASE_PROJECT_ID?.startsWith('demo-')) problems.push('FIREBASE_PROJECT_ID precisa começar com "demo-".');
-  for (const key of ['FIRESTORE_EMULATOR_HOST', 'FIREBASE_AUTH_EMULATOR_HOST']) {
+  for (const key of ['FIRESTORE_EMULATOR_HOST', 'FIREBASE_AUTH_EMULATOR_HOST', 'FIREBASE_STORAGE_EMULATOR_HOST']) {
     if (!env[key]) problems.push(`${key} ausente.`);
     else if (!env[key].startsWith(`${HOST}:`)) problems.push(`${key} não aponta para ${HOST}.`);
   }
   if (env.GOOGLE_APPLICATION_CREDENTIALS || env.FIREBASE_SERVICE_ACCOUNT_JSON) problems.push('credenciais Google presentes no ambiente da API.');
+  if (!env.FIREBASE_STORAGE_BUCKET?.startsWith('demo-')) problems.push('FIREBASE_STORAGE_BUCKET precisa ser do projeto "demo-".');
+  if (env.STORAGE_EMULATOR_HOST) problems.push('STORAGE_EMULATOR_HOST presente no ambiente da API.');
   if (problems.length) throw new Error(`execução recusada: ${problems.join(' ')}`);
 }
 
@@ -181,9 +190,11 @@ async function main() {
     firestore: await pickPort(8181, taken),
     firestoreWs: await pickPort(9150, taken),
     auth: await pickPort(9099, taken),
+    storage: await pickPort(9199, taken),
     hub: await pickPort(4400, taken),
     logging: await pickPort(4500, taken),
     api: await pickPort(8010, taken),
+    ...(SERVE && { web: await pickPort(5180, taken) }),
   };
   const ownedPorts = Object.values(ports);
   const work = mkdtempSync(join(tmpdir(), 'mdp-e2e-'));
@@ -202,10 +213,12 @@ async function main() {
   try {
     const firebaseConfig = {
       firestore: { rules: join(ROOT, 'firestore.rules') },
+      storage: { rules: join(ROOT, 'storage.rules') },
       emulators: {
         singleProjectMode: true,
         firestore: { host: HOST, port: ports.firestore, websocketPort: ports.firestoreWs },
         auth: { host: HOST, port: ports.auth },
+        storage: { host: HOST, port: ports.storage },
         hub: { host: HOST, port: ports.hub },
         logging: { host: HOST, port: ports.logging },
         ui: { enabled: false },
@@ -216,26 +229,44 @@ async function main() {
     // Ambiente sem credenciais reais: sem GOOGLE_APPLICATION_CREDENTIALS e com uma pasta gcloud vazia
     // (o ADC do usuário não é encontrado). Os emuladores não exigem credenciais.
     const baseEnv = { ...process.env, CLOUDSDK_CONFIG: emptyGcloud };
-    for (const k of ['GOOGLE_APPLICATION_CREDENTIALS', 'FIREBASE_SERVICE_ACCOUNT_JSON', 'GOOGLE_CLOUD_PROJECT', 'GCLOUD_PROJECT', 'FIREBASE_CONFIG']) delete baseEnv[k];
+    for (const k of [
+      'GOOGLE_APPLICATION_CREDENTIALS',
+      'FIREBASE_SERVICE_ACCOUNT_JSON',
+      'GOOGLE_CLOUD_PROJECT',
+      'GCLOUD_PROJECT',
+      'FIREBASE_CONFIG',
+      'STORAGE_EMULATOR_HOST',
+      'FIREBASE_STORAGE_BUCKET',
+      'IMAGE_STORAGE',
+    ]) delete baseEnv[k];
 
-    const emulators = start('emuladores', process.execPath, [firebase, 'emulators:start', '--only', 'firestore,auth', '--project', PROJECT, '--config', join(work, 'firebase.json')], {
+    const emulators = start('emuladores', process.execPath, [firebase, 'emulators:start', '--only', 'firestore,auth,storage', '--project', PROJECT, '--config', join(work, 'firebase.json')], {
       cwd: work,
       env: baseEnv,
       logFile: join(work, 'emulators.log'),
     });
     await waitFor(
       'emuladores',
-      async () => readFileSync(join(work, 'emulators.log'), 'utf8').includes('All emulators ready') && (await isListening(ports.firestore)) && (await isListening(ports.auth)),
+      async () => readFileSync(join(work, 'emulators.log'), 'utf8').includes('All emulators ready') &&
+        (await isListening(ports.firestore)) &&
+        (await isListening(ports.auth)) &&
+        (await isListening(ports.storage)),
       120_000,
       () => !emulators.exited,
     );
-    log(`emuladores prontos (Firestore ${HOST}:${ports.firestore}, Auth ${HOST}:${ports.auth})`);
+    log(`emuladores prontos (Firestore ${HOST}:${ports.firestore}, Auth ${HOST}:${ports.auth}, Storage ${HOST}:${ports.storage})`);
 
-    if (WITH_BACKEND) {
-      log('executando os testes do backend no Firestore Emulator (pytest tests_emulator)…');
+    if (WITH_BACKEND && !SERVE) {
+      log('executando os testes do backend nos emuladores (pytest tests_emulator)…');
       const pytest = spawnSync(python, ['-m', 'pytest', 'tests_emulator', '-q'], {
         cwd: BACKEND,
-        env: { ...baseEnv, FIRESTORE_EMULATOR_HOST: `${HOST}:${ports.firestore}` },
+        env: {
+          ...baseEnv,
+          FIRESTORE_EMULATOR_HOST: `${HOST}:${ports.firestore}`,
+          FIREBASE_STORAGE_EMULATOR_HOST: `${HOST}:${ports.storage}`,
+          // Sem o Storage Emulator, os testes de fotos falham em vez de serem pulados.
+          E2E_REQUIRE_STORAGE: '1',
+        },
         stdio: 'inherit',
       });
       if (pytest.status !== 0) fail(`testes do backend no emulador falharam (código ${pytest.status})`);
@@ -251,8 +282,11 @@ async function main() {
       FIRESTORE_DATABASE_ID: '(default)',
       FIRESTORE_EMULATOR_HOST: `${HOST}:${ports.firestore}`,
       FIREBASE_AUTH_EMULATOR_HOST: `${HOST}:${ports.auth}`,
+      IMAGE_STORAGE: 'firebase',
+      FIREBASE_STORAGE_BUCKET: BUCKET,
+      FIREBASE_STORAGE_EMULATOR_HOST: `${HOST}:${ports.storage}`,
       ADMIN_ALLOWED_UIDS: ADMIN_UID,
-      CORS_ORIGINS: '',
+      CORS_ORIGINS: SERVE ? `http://${HOST}:${ports.web}` : '',
     };
     assertSafeTarget(apiEnv);
     // cwd fora de backend/: o arquivo backend/.env (que aponta para o projeto real) não é lido.
@@ -277,7 +311,10 @@ async function main() {
       () => !api.exited,
     );
     if (health?.dependencies?.database?.status !== 'emulator') throw new Error('a API não confirmou o uso do Firestore Emulator: abortado antes dos testes');
-    log(`FastAPI pronto em ${apiUrl} (database: emulator, environment: ${health.environment})`);
+    if (health?.dependencies?.storage?.status !== 'emulator') throw new Error('a API não confirmou o uso do Storage Emulator: abortado antes dos testes');
+    log(`FastAPI pronto em ${apiUrl} (database: emulator, storage: emulator, environment: ${health.environment})`);
+
+    if (SERVE) return await serve({ ports, apiUrl, work, baseEnv });
 
     const testEnv = {
       ...baseEnv,
@@ -285,6 +322,8 @@ async function main() {
       E2E_PROJECT_ID: PROJECT,
       FIRESTORE_EMULATOR_HOST: apiEnv.FIRESTORE_EMULATOR_HOST,
       FIREBASE_AUTH_EMULATOR_HOST: apiEnv.FIREBASE_AUTH_EMULATOR_HOST,
+      FIREBASE_STORAGE_EMULATOR_HOST: apiEnv.FIREBASE_STORAGE_EMULATOR_HOST,
+      E2E_STORAGE_BUCKET: BUCKET,
     };
     log('executando os testes de ponta a ponta…');
     const vitest = spawnSync(process.execPath, [vitestBin, 'run', '--config', 'vitest.e2e.config.ts', ...VITEST_ARGS], { cwd: ROOT, env: testEnv, stdio: 'inherit' });
@@ -303,6 +342,49 @@ async function main() {
       }
     }
   }
+}
+
+/** `--serve`: frontend (vite dev) ligado aos emuladores e à API; mantém tudo no ar até Ctrl+C. */
+async function serve({ ports, apiUrl, work, baseEnv }) {
+  // Administrador de teste no Auth Emulator (somente o emulador aceita "Bearer owner").
+  const r = await fetch(`http://${HOST}:${ports.auth}/identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+    body: JSON.stringify({ localId: ADMIN_UID, email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
+  });
+  if (!r.ok && !(await r.text()).includes('DUPLICATE')) throw new Error('Auth Emulator recusou o administrador de teste');
+  const viteBin = join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
+  const webEnv = {
+    ...baseEnv,
+    VITE_ADMIN_AUTH_MODE: 'firebase',
+    VITE_STORE_DATA_SOURCE: 'api',
+    VITE_API_BASE_URL: apiUrl,
+    VITE_FIREBASE_API_KEY: 'fake-api-key',
+    VITE_FIREBASE_AUTH_DOMAIN: `${PROJECT}.firebaseapp.com`,
+    VITE_FIREBASE_PROJECT_ID: PROJECT,
+    VITE_FIREBASE_APP_ID: '1:000000000000:web:0000000000000000',
+    VITE_FIREBASE_MESSAGING_SENDER_ID: '000000000000',
+    VITE_FIREBASE_AUTH_EMULATOR_HOST: `${HOST}:${ports.auth}`,
+  };
+  // Variáveis do processo têm prioridade sobre os arquivos .env do Vite: o .env.local (projeto real) não vale aqui.
+  // Todas as chaves que ele poderia definir estão acima, inclusive as do Firebase (projeto demo-*).
+  const web = start('frontend (vite)', process.execPath, [viteBin, '--mode', 'emulator', '--host', HOST, '--port', String(ports.web), '--strictPort'], {
+    cwd: ROOT,
+    env: webEnv,
+    logFile: join(work, 'web.log'),
+  });
+  const webUrl = `http://${HOST}:${ports.web}/MundoDasPatas/`; // `base` do vite.config.ts
+  await waitFor('frontend', () => isListening(ports.web), 60_000, () => !web.exited);
+  log(`pronto: ${webUrl}#/admin  (login ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}). Ctrl+C encerra tudo.`);
+  await new Promise((resolve) => {
+    const timer = setInterval(() => {
+      if (started.some((e) => e.exited)) {
+        clearInterval(timer);
+        fail('um dos serviços terminou inesperadamente (ver logs)');
+        resolve();
+      }
+    }, 1000);
+  });
 }
 
 await main();

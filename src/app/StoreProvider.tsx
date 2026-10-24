@@ -16,6 +16,9 @@ interface Snapshot {
   dashboard?: DashboardSummary;
 }
 
+const NO_UPLOAD = { available: false, maxBytes: 0 };
+const NO_IMAGE_API = { ok: false as const, error: 'Envio de fotos indisponível nesta versão.' };
+
 /** Horário do último carregamento bem-sucedido de cada origem (para `refresh(maxAgeMs)`). */
 const loadedAt = new WeakMap<StoreApi, number>();
 
@@ -98,6 +101,9 @@ export function StoreProvider({ api, children }: Props) {
       toggleCategory: (id) => apply(() => api.toggleCategory(id)),
       saveSettings: (s) => apply(() => api.saveSettings(s)),
       resetDemo: () => apply(() => api.resetDemo()),
+      imageUploadConfig: () => api.imageUploadConfig?.() ?? Promise.resolve(NO_UPLOAD),
+      uploadProductImage: (id, image) => apply(() => api.uploadProductImage?.(id, image) ?? Promise.resolve(NO_IMAGE_API)),
+      removeProductImage: (id) => apply(() => api.removeProductImage?.(id) ?? Promise.resolve(NO_IMAGE_API)),
       refresh: async (maxAgeMs = 0) => {
         if (maxAgeMs > 0 && Date.now() - (loadedAt.get(api) ?? 0) < maxAgeMs) return;
         try {

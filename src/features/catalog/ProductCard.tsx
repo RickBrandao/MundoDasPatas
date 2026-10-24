@@ -1,6 +1,6 @@
 import { useCart, useStore, useUi } from '../../app/contexts';
 import { Icon } from '../../components/Icon';
-import { imageFor } from '../../components/productArt';
+import { ProductImage } from '../../components/ProductImage';
 import { STOCK_PUBLIC } from '../../components/status';
 import { stockStatus } from '../../domain/catalog';
 import { formatBRL, hasPublicPrice } from '../../domain/money';
@@ -20,7 +20,7 @@ export function ProductCard({ product: p }: { product: Product }) {
   return (
     <article className="pcard">
       <button type="button" className="pcard__media" onClick={() => openDetail(p.id)} aria-label={`Ver detalhes de ${p.name}`}>
-        <img src={imageFor(p).src} alt="" loading="lazy" decoding="async" />
+        <ProductImage product={p} loading="lazy" decoding="async" />
         <span className={`pcard__status ${PUBLIC_TONE[st]}`}>{STOCK_PUBLIC[st]}</span>
       </button>
       <div className="pcard__body">
